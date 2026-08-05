@@ -1,21 +1,14 @@
 <?php
 /**
- * Easy AI · PHP 后端
+ * Easy AI · PHP 后端 v2
  * ------------------------------------------------------
- * - OpenAI 兼容接口代理（SSE 流式输出 + 多线路自动故障转移）
+ * - OpenAI 兼容接口代理（SSE 流式 + 多线路故障转移 / strict 单线路）
  * - 配置管理（API Key 只保存在服务器端，前端永不可见）
- * - 对话持久化（JSON 文件存储，自动创建 data/ 目录）
+ * - 对话持久化 + 文件夹分组 + 全文搜索
+ * - 分享链接（只读快照）
+ * - 提示词库
  *
- * 依赖：PHP >= 7.4 + curl 扩展。无任何框架依赖，直接放入网站目录即可。
- *
- * 接口一览（全部走 ?action=）：
- *   GET  ?action=config        读取配置（密钥打码）
- *   POST ?action=config        保存配置（密钥留空或原样 = 保持不变）
- *   GET  ?action=chats         会话列表
- *   GET  ?action=chat&id=xx    读取单个会话
- *   POST ?action=chat          保存会话 {id?, title, messages}
- *   POST ?action=chat_delete   删除会话 {id}
- *   POST ?action=generate      流式生成（SSE）{messages, provider?}
+ * 依赖：PHP >= 7.4 + curl 扩展。无框架、无数据库，放入网站目录即用。
  */
 
 error_reporting(E_ALL);
@@ -24,9 +17,13 @@ ini_set('display_errors', '0');
 define('DATA_DIR', __DIR__ . '/data');
 define('CONFIG_FILE', DATA_DIR . '/config.json');
 define('CHATS_DIR', DATA_DIR . '/chats');
+define('FOLDERS_FILE', DATA_DIR . '/folders.json');
+define('SHARES_DIR', DATA_DIR . '/shares');
+define('PROMPTS_FILE', DATA_DIR . '/prompts.json');
 
 if (!is_dir(DATA_DIR))  @mkdir(DATA_DIR, 0777, true);
 if (!is_dir(CHATS_DIR)) @mkdir(CHATS_DIR, 0777, true);
+if (!is_dir(SHARES_DIR)) @mkdir(SHARES_DIR, 0777, true);
 
 /* ------------------------------------------------------------------ */
 /* 内置输出规则（画图 + 作曲），生成时自动追加到系统提示词后面          */
@@ -118,6 +115,13 @@ function str_cut($s, $len) {
     return $out;
 }
 
+// 大小写不敏感的包含判断
+function str_has($haystack, $needle) {
+    if ($needle === '') return true;
+    if (function_exists('mb_stripos')) return mb_stripos($haystack, $needle) !== false;
+    return stripos($haystack, $needle) !== false;
+}
+
 function default_config() {
     return [
         'name'   => DEFAULT_NAME,
@@ -132,7 +136,6 @@ function default_config() {
 
 function load_config() {
     $cfg = array_replace_recursive(default_config(), jread(CONFIG_FILE, []));
-    // 规范 providers 结构
     $ps = [];
     for ($i = 0; $i < 3; $i++) {
         $p = isset($cfg['providers'][$i]) && is_array($cfg['providers'][$i]) ? $cfg['providers'][$i] : [];
@@ -144,6 +147,25 @@ function load_config() {
     }
     $cfg['providers'] = $ps;
     return $cfg;
+}
+
+function clean_id($s) {
+    return preg_replace('/[^A-Za-z0-9_\-]/', '', (string)$s);
+}
+
+function read_chat_file($id) {
+    if ($id === '') return null;
+    $c = jread(CHATS_DIR . '/' . $id . '.json', null);
+    return is_array($c) ? $c : null;
+}
+
+function chat_meta($c) {
+    return [
+        'id'         => (string)($c['id'] ?? ''),
+        'title'      => (string)($c['title'] ?? '新对话'),
+        'folder'     => (string)($c['folder'] ?? ''),
+        'updated_at' => (int)($c['updated_at'] ?? 0),
+    ];
 }
 
 /* ------------------------------------------------------------------ */
@@ -167,17 +189,14 @@ switch ($action) {
 case 'config':
     if ($method === 'GET') {
         $cfg = load_config();
-        $out = [
+        json_out([
             'name'   => $cfg['name'],
             'prompt' => $cfg['prompt'],
             'providers' => array_map(function ($p) {
                 return ['url' => $p['url'], 'key' => mask_key($p['key']), 'model' => $p['model']];
             }, $cfg['providers']),
-        ];
-        json_out($out);
+        ]);
     }
-
-    // POST：保存。密钥字段为空、或与打码值一致 → 视为不修改
     $old = load_config();
     $new = default_config();
     $new['name']   = trim((string)($body['name'] ?? '')) ?: DEFAULT_NAME;
@@ -198,40 +217,40 @@ case 'config':
     json_out(['ok' => true]);
     break;
 
-/* ---------------- 会话列表 ---------------- */
+/* ---------------- 会话列表（支持搜索 q） ---------------- */
 case 'chats':
+    $q = trim((string)($_GET['q'] ?? ''));
     $list = [];
     foreach (glob(CHATS_DIR . '/*.json') ?: [] as $f) {
         $c = jread($f, null);
         if (!is_array($c) || empty($c['id'])) continue;
-        $list[] = [
-            'id'         => (string)$c['id'],
-            'title'      => (string)($c['title'] ?? '新对话'),
-            'updated_at' => (int)($c['updated_at'] ?? 0),
-        ];
+        if ($q !== '') {
+            $hit = str_has((string)($c['title'] ?? ''), $q);
+            if (!$hit) {
+                foreach (($c['messages'] ?? []) as $m) {
+                    if (str_has((string)($m['content'] ?? ''), $q)) { $hit = true; break; }
+                }
+            }
+            if (!$hit) continue;
+        }
+        $list[] = chat_meta($c);
     }
     usort($list, function ($a, $b) { return $b['updated_at'] <=> $a['updated_at']; });
     json_out(['chats' => $list]);
     break;
 
-/* ---------------- 单个会话 读/存/删 ---------------- */
+/* ---------------- 单个会话 读/存 ---------------- */
 case 'chat':
     if ($method === 'GET') {
-        $id = preg_replace('/[^A-Za-z0-9_\-]/', '', (string)($_GET['id'] ?? ''));
+        $id = clean_id($_GET['id'] ?? '');
         if ($id === '') json_err('缺少 id');
-        $c = jread(CHATS_DIR . '/' . $id . '.json', null);
-        if (!is_array($c)) json_err('会话不存在', 404);
+        $c = read_chat_file($id);
+        if (!$c) json_err('会话不存在', 404);
         json_out($c);
     }
 
-    if ($method === 'DELETE' || $action === 'chat_delete') {
-        $id = preg_replace('/[^A-Za-z0-9_\-]/', '', (string)($body['id'] ?? ($_GET['id'] ?? '')));
-        if ($id !== '') @unlink(CHATS_DIR . '/' . $id . '.json');
-        json_out(['ok' => true]);
-    }
-
     // POST 保存
-    $id = preg_replace('/[^A-Za-z0-9_\-]/', '', (string)($body['id'] ?? ''));
+    $id = clean_id($body['id'] ?? '');
     if ($id === '') $id = date('YmdHis') . '_' . substr(md5(uniqid('', true)), 0, 8);
     $title = trim((string)($body['title'] ?? ''));
     if ($title === '') $title = '新对话';
@@ -245,10 +264,14 @@ case 'chat':
         if (!empty($m['thinking'])) $item['thinking'] = (string)$m['thinking'];
         $clean[] = $item;
     }
-    $old = jread(CHATS_DIR . '/' . $id . '.json', null);
+    $old = read_chat_file($id);
+    // 文件夹：显式传了就用新值，否则保留原值
+    $folder = $old ? (string)($old['folder'] ?? '') : '';
+    if (array_key_exists('folder', $body)) $folder = clean_id($body['folder']);
     $chat = [
         'id'         => $id,
         'title'      => str_cut($title, 60),
+        'folder'     => $folder,
         'created_at' => is_array($old) && !empty($old['created_at']) ? (int)$old['created_at'] : time(),
         'updated_at' => time(),
         'messages'   => $clean,
@@ -258,8 +281,129 @@ case 'chat':
     break;
 
 case 'chat_delete':
-    $id = preg_replace('/[^A-Za-z0-9_\-]/', '', (string)($body['id'] ?? ''));
+    $id = clean_id($body['id'] ?? '');
     if ($id !== '') @unlink(CHATS_DIR . '/' . $id . '.json');
+    json_out(['ok' => true]);
+    break;
+
+/* ---------------- 移动会话到文件夹 ---------------- */
+case 'chat_move':
+    $id = clean_id($body['id'] ?? '');
+    $c = read_chat_file($id);
+    if (!$c) json_err('会话不存在', 404);
+    $c['folder'] = clean_id($body['folder'] ?? '');
+    jwrite(CHATS_DIR . '/' . $id . '.json', $c);
+    json_out(['ok' => true]);
+    break;
+
+/* ---------------- 文件夹 ---------------- */
+case 'folders':
+    json_out(['folders' => jread(FOLDERS_FILE, [])]);
+    break;
+
+case 'folder_save':
+    $name = trim((string)($body['name'] ?? ''));
+    if ($name === '') json_err('文件夹名称不能为空');
+    $folders = jread(FOLDERS_FILE, []);
+    $id = clean_id($body['id'] ?? '');
+    if ($id !== '') {
+        foreach ($folders as &$f) {
+            if (($f['id'] ?? '') === $id) { $f['name'] = str_cut($name, 30); break; }
+        }
+        unset($f);
+    } else {
+        $id = 'f_' . date('YmdHis') . substr(md5(uniqid('', true)), 0, 6);
+        $folders[] = ['id' => $id, 'name' => str_cut($name, 30)];
+    }
+    jwrite(FOLDERS_FILE, $folders);
+    json_out(['ok' => true, 'id' => $id]);
+    break;
+
+case 'folder_delete':
+    $id = clean_id($body['id'] ?? '');
+    $folders = array_values(array_filter(jread(FOLDERS_FILE, []), function ($f) use ($id) {
+        return ($f['id'] ?? '') !== $id;
+    }));
+    jwrite(FOLDERS_FILE, $folders);
+    // 该文件夹下的会话改为未分组
+    foreach (glob(CHATS_DIR . '/*.json') ?: [] as $f) {
+        $c = jread($f, null);
+        if (is_array($c) && ($c['folder'] ?? '') === $id) {
+            $c['folder'] = '';
+            jwrite($f, $c);
+        }
+    }
+    json_out(['ok' => true]);
+    break;
+
+/* ---------------- 分享 ---------------- */
+case 'share':
+    if ($method === 'GET') {
+        $token = clean_id($_GET['token'] ?? '');
+        if ($token === '') json_err('缺少 token');
+        $s = jread(SHARES_DIR . '/' . $token . '.json', null);
+        if (!is_array($s)) json_err('分享不存在或已删除', 404);
+        json_out($s);
+    }
+    // POST：为某个会话创建只读快照
+    $id = clean_id($body['id'] ?? '');
+    $c = read_chat_file($id);
+    if (!$c) json_err('会话不存在', 404);
+    $token = substr(str_replace(['+', '/', '='], '', base64_encode(random_bytes(12))), 0, 12);
+    jwrite(SHARES_DIR . '/' . $token . '.json', [
+        'token'      => $token,
+        'title'      => (string)($c['title'] ?? '分享'),
+        'messages'   => $c['messages'] ?? [],
+        'created_at' => time(),
+    ]);
+    json_out(['ok' => true, 'token' => $token]);
+    break;
+
+case 'share_delete':
+    $token = clean_id($body['token'] ?? '');
+    if ($token !== '') @unlink(SHARES_DIR . '/' . $token . '.json');
+    json_out(['ok' => true]);
+    break;
+
+/* ---------------- 提示词库 ---------------- */
+case 'prompts':
+    json_out(['prompts' => jread(PROMPTS_FILE, [])]);
+    break;
+
+case 'prompt_save':
+    $title = trim((string)($body['title'] ?? ''));
+    $content = trim((string)($body['content'] ?? ''));
+    if ($title === '' || $content === '') json_err('标题和内容不能为空');
+    $prompts = jread(PROMPTS_FILE, []);
+    $id = clean_id($body['id'] ?? '');
+    if ($id !== '') {
+        $found = false;
+        foreach ($prompts as &$p) {
+            if (($p['id'] ?? '') === $id) {
+                $p['title'] = str_cut($title, 50);
+                $p['content'] = $content;
+                $p['updated_at'] = time();
+                $found = true;
+                break;
+            }
+        }
+        unset($p);
+        if (!$found) $id = '';
+    }
+    if ($id === '') {
+        $id = 'p_' . date('YmdHis') . substr(md5(uniqid('', true)), 0, 6);
+        $prompts[] = ['id' => $id, 'title' => str_cut($title, 50), 'content' => $content, 'updated_at' => time()];
+    }
+    jwrite(PROMPTS_FILE, $prompts);
+    json_out(['ok' => true, 'id' => $id]);
+    break;
+
+case 'prompt_delete':
+    $id = clean_id($body['id'] ?? '');
+    $prompts = array_values(array_filter(jread(PROMPTS_FILE, []), function ($p) use ($id) {
+        return ($p['id'] ?? '') !== $id;
+    }));
+    jwrite(PROMPTS_FILE, $prompts);
     json_out(['ok' => true]);
     break;
 
@@ -271,23 +415,23 @@ case 'generate':
     if (!$messages) json_err('messages 不能为空');
 
     $prefer = isset($body['provider']) ? (int)$body['provider'] : -1;
+    $strict = !empty($body['strict']);
     $cfg = load_config();
 
-    // 有效线路
     $valid = [];
     foreach ($cfg['providers'] as $i => $p) {
         if ($p['url'] !== '' && $p['key'] !== '' && $p['model'] !== '') $valid[] = $i;
     }
     if (!$valid) json_err('尚未配置可用的 API 线路，请先在设置中填写', 400);
 
-    // 优先线路排前面，其余按顺序做故障转移
-    $order = $valid;
-    if ($prefer >= 0 && in_array($prefer, $valid, true)) {
-        $order = array_values(array_diff($valid, [$prefer]));
-        array_unshift($order, $prefer);
+    // 组装尝试顺序
+    if ($prefer >= 0) {
+        if (!in_array($prefer, $valid, true)) json_err('指定线路不可用', 400);
+        $order = $strict ? [$prefer] : array_merge([$prefer], array_values(array_diff($valid, [$prefer])));
+    } else {
+        $order = $valid;
     }
 
-    // 组装完整 messages：系统提示词（含输出规则）+ 历史
     $sys = $cfg['prompt'] . AUTO_RULES;
     $full = [['role' => 'system', 'content' => $sys]];
     foreach ($messages as $m) {
@@ -299,7 +443,6 @@ case 'generate':
         $full[] = ['role' => $role, 'content' => $content];
     }
 
-    // SSE 响应头
     header('Content-Type: text/event-stream; charset=utf-8');
     header('Cache-Control: no-cache, no-transform');
     header('Connection: keep-alive');
@@ -321,12 +464,10 @@ case 'generate':
         $p = $cfg['providers'][$idx];
         $ok = stream_from_provider($p, $full, $sse);
         if ($ok) { $done = true; break; }
-        // 该线路失败且尚未输出任何内容 → 继续尝试下一条线路
         if (connection_aborted()) break;
     }
 
     if (!$done && !headers_sent()) {
-        // 走到这里说明一条都没成功（且一条都没输出过）
         $sse(['error' => '所有 API 线路均不可用，请检查配置或稍后再试']);
     }
     echo "data: [DONE]\n\n";
@@ -338,7 +479,7 @@ default:
     json_out([
         'name'    => 'Easy AI API',
         'ok'      => true,
-        'actions' => ['config', 'chats', 'chat', 'chat_delete', 'generate'],
+        'actions' => ['config', 'chats', 'chat', 'chat_delete', 'chat_move', 'folders', 'folder_save', 'folder_delete', 'share', 'share_delete', 'prompts', 'prompt_save', 'prompt_delete', 'generate'],
     ]);
 }
 
@@ -356,9 +497,9 @@ function stream_from_provider($provider, $messages, $sse) {
         'max_tokens'  => 4096,
     ];
 
-    $isSSE    = null;   // 上游是否真 SSE
-    $started  = false;  // 是否已向浏览器吐出过正文
-    $jsonBuf  = '';     // 上游若返回整块 JSON，先攒着
+    $isSSE    = null;
+    $started  = false;
+    $jsonBuf  = '';
     $errBuf   = '';
     $httpCode = 0;
 
@@ -398,9 +539,9 @@ function stream_from_provider($provider, $messages, $sse) {
                 $sse(['meta' => true, 'model' => $provider['model']]);
             }
             if ($isSSE === false) {
-                $jsonBuf .= $chunk;          // 非 SSE 上游：攒完整块再转成 SSE
+                $jsonBuf .= $chunk;
             } else {
-                echo $chunk;                 // SSE 上游：原样透传
+                echo $chunk;
                 @flush();
             }
             return strlen($chunk);
@@ -412,12 +553,9 @@ function stream_from_provider($provider, $messages, $sse) {
     $httpCode = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
     curl_close($ch);
 
-    // 一条内容都没吐出去 → 判定本线路失败，交给下一条
     if (!$started) return false;
-
     if ($httpCode >= 400) return false;
 
-    // 上游返回的是完整 JSON（非流式）→ 手动拆成 SSE 事件
     if ($isSSE === false && $jsonBuf !== '') {
         $data = json_decode($jsonBuf, true);
         if (is_array($data) && isset($data['choices'][0]['message'])) {
