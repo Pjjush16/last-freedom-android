@@ -20,6 +20,13 @@ define('CHATS_DIR', DATA_DIR . '/chats');
 define('FOLDERS_FILE', DATA_DIR . '/folders.json');
 define('SHARES_DIR', DATA_DIR . '/shares');
 define('PROMPTS_FILE', DATA_DIR . '/prompts.json');
+define('UPLOADS_DIR', DATA_DIR . '/uploads');
+
+if (!is_dir(UPLOADS_DIR)) @mkdir(UPLOADS_DIR, 0777, true);
+
+// 上传限制
+define('MAX_UPLOAD_SIZE', 15 * 1024 * 1024); // 15MB
+define('ALLOWED_EXT', 'png,jpg,jpeg,gif,webp,bmp,txt,md,csv,json,log,pdf,docx,xlsx,pptx,zip,mp3,wav');
 
 if (!is_dir(DATA_DIR))  @mkdir(DATA_DIR, 0777, true);
 if (!is_dir(CHATS_DIR)) @mkdir(CHATS_DIR, 0777, true);
@@ -395,6 +402,17 @@ case 'chat':
         if (!in_array($role, ['user', 'assistant'], true)) continue;
         $item = ['role' => $role, 'content' => (string)($m['content'] ?? '')];
         if (!empty($m['thinking'])) $item['thinking'] = (string)$m['thinking'];
+        if (!empty($m['attachments']) && is_array($m['attachments'])) {
+            $atts = [];
+            foreach ($m['attachments'] as $a) {
+                $aid = clean_id(is_array($a) ? ($a['id'] ?? '') : $a);
+                if ($aid !== '' && is_file(UPLOADS_DIR . '/' . $aid . '.meta.json')) {
+                    $am = jread(UPLOADS_DIR . '/' . $aid . '.meta.json', []);
+                    $atts[] = ['id' => $aid, 'name' => (string)($am['name'] ?? ''), 'mime' => (string)($am['mime'] ?? '')];
+                }
+            }
+            if ($atts) $item['attachments'] = $atts;
+        }
         $clean[] = $item;
     }
     $old = read_chat_file($id);
@@ -540,6 +558,92 @@ case 'prompt_delete':
     json_out(['ok' => true]);
     break;
 
+/* ---------------- 文件上传（供 read_image / read_file 工具使用） ---------------- */
+case 'upload':
+    if (empty($_FILES) || !isset($_FILES['file'])) json_err('未收到文件（字段名应为 file）');
+    $f = $_FILES['file'];
+    if (($f['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) json_err('上传失败，错误码 ' . (int)$f['error']);
+    $size = (int)($f['size'] ?? 0);
+    if ($size <= 0) json_err('文件为空');
+    if ($size > MAX_UPLOAD_SIZE) json_err('文件超过 ' . (MAX_UPLOAD_SIZE / 1024 / 1024) . 'MB 限制');
+
+    $origName = (string)($f['name'] ?? 'file');
+    $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
+    $allowed = explode(',', ALLOWED_EXT);
+    if ($ext === '' || !in_array($ext, $allowed, true)) {
+        json_err('不支持的文件类型：.' . $ext);
+    }
+
+    // 推断 MIME
+    $mimeMap = [
+        'png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','gif'=>'image/gif','webp'=>'image/webp','bmp'=>'image/bmp',
+        'txt'=>'text/plain','md'=>'text/markdown','csv'=>'text/csv','json'=>'application/json','log'=>'text/plain',
+        'pdf'=>'application/pdf','docx'=>'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'xlsx'=>'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'pptx'=>'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'zip'=>'application/zip','mp3'=>'audio/mpeg','wav'=>'audio/wav',
+    ];
+    $mime = isset($mimeMap[$ext]) ? $mimeMap[$ext] : 'application/octet-stream';
+    if (function_exists('finfo_open')) {
+        $fi = finfo_open(FILEINFO_MIME_TYPE);
+        $detected = finfo_file($fi, $f['tmp_name']);
+        finfo_close($fi);
+        if ($detected) $mime = $detected;
+    }
+
+    $id = 'u_' . date('YmdHis') . '_' . substr(md5(uniqid('', true)), 0, 8);
+    $dest = UPLOADS_DIR . '/' . $id;
+    if (!move_uploaded_file($f['tmp_name'], $dest)) json_err('保存文件失败');
+
+    $meta = [
+        'id'         => $id,
+        'name'       => str_cut($origName, 120),
+        'ext'        => $ext,
+        'mime'       => $mime,
+        'size'       => $size,
+        'created_at' => time(),
+    ];
+    jwrite(UPLOADS_DIR . '/' . $id . '.meta.json', $meta);
+    json_out(['ok' => true, 'id' => $id, 'name' => $meta['name'], 'mime' => $mime, 'size' => $size]);
+    break;
+
+/* ---------------- 读取已上传文件（预览 / 下载） ---------------- */
+case 'file':
+    $id = clean_id($_GET['id'] ?? '');
+    if ($id === '') json_err('缺少 id');
+    $path = UPLOADS_DIR . '/' . $id;
+    if (!is_file($path)) json_err('文件不存在', 404);
+    $meta = jread($path . '.meta.json', ['name' => $id, 'mime' => 'application/octet-stream']);
+    $mime = (string)($meta['mime'] ?? 'application/octet-stream');
+    $name = (string)($meta['name'] ?? $id);
+    $download = !empty($_GET['download']);
+    header('Content-Type: ' . $mime);
+    header('Content-Length: ' . filesize($path));
+    header('Content-Disposition: ' . ($download ? 'attachment' : 'inline') . '; filename="' . rawurlencode($name) . '"');
+    header('Cache-Control: private, max-age=3600');
+    readfile($path);
+    exit;
+
+/* ---------------- 上传列表 / 删除 ---------------- */
+case 'uploads':
+    $list = [];
+    foreach (glob(UPLOADS_DIR . '/*.meta.json') ?: [] as $mf) {
+        $m = jread($mf, null);
+        if (is_array($m) && !empty($m['id'])) $list[] = $m;
+    }
+    usort($list, function ($a, $b) { return ($b['created_at'] ?? 0) <=> ($a['created_at'] ?? 0); });
+    json_out(['uploads' => $list]);
+    break;
+
+case 'upload_delete':
+    $id = clean_id($body['id'] ?? '');
+    if ($id !== '') {
+        @unlink(UPLOADS_DIR . '/' . $id);
+        @unlink(UPLOADS_DIR . '/' . $id . '.meta.json');
+    }
+    json_out(['ok' => true]);
+    break;
+
 /* ---------------- 独立搜索（调试用） ---------------- */
 case 'websearch':
     $q = trim((string)($_GET['q'] ?? ''));
@@ -599,31 +703,57 @@ case 'generate':
         @flush();
     };
 
-    /* ---- 联网搜索：优先 Tools（模型按需自主搜索），不支持 tools 的线路回退预注入 ---- */
+    /* ---- 技能系统：Tools（模型按需调用），不支持 tools 的线路回退预注入 ---- */
     $web = !empty($body['web']);
-    $webTools = $web ? [[
-        'type' => 'function',
-        'function' => [
-            'name' => 'web_search',
-            'description' => '搜索互联网获取实时信息（最新新闻、产品发布、价格、赛事、天气、时效性事实等）。当用户问题需要最新信息或事实核查时必须调用；query 使用提炼后的简洁关键词。',
-            'parameters' => [
-                'type' => 'object',
-                'properties' => [
-                    'query' => ['type' => 'string', 'description' => '搜索关键词，简洁准确']
-                ],
-                'required' => ['query']
-            ]
-        ]
-    ]] : null;
+
+    // 解析本次消息携带的附件（已上传文件的 id）
+    $attachments = [];
+    if (!empty($body['attachments']) && is_array($body['attachments'])) {
+        foreach ($body['attachments'] as $aid) {
+            $aid = clean_id(is_array($aid) ? ($aid['id'] ?? '') : $aid);
+            if ($aid === '') continue;
+            $meta = jread(UPLOADS_DIR . '/' . $aid . '.meta.json', null);
+            if (is_array($meta) && !empty($meta['id'])) $attachments[] = $meta;
+        }
+    }
+    $hasImage = false;
+    $hasFile = false;
+    foreach ($attachments as $a) {
+        if (strpos((string)$a['mime'], 'image/') === 0) $hasImage = true;
+        else $hasFile = true;
+    }
+
+    // 技能注册表：按场景动态组装
+    $tools = build_tool_defs($web, $hasImage, $hasFile);
+
+    // 把附件清单注入到最后一条用户消息，让模型知道有哪些文件可用
+    if ($attachments) {
+        $lastIdx = -1;
+        for ($k = count($full) - 1; $k >= 0; $k--) {
+            if ($full[$k]['role'] === 'user') { $lastIdx = $k; break; }
+        }
+        if ($lastIdx >= 0) {
+            $list = '';
+            foreach ($attachments as $a) {
+                $kind = strpos((string)$a['mime'], 'image/') === 0 ? '图片' : '文件';
+                $list .= '- [' . $kind . '] ' . $a['name'] . '（id=' . $a['id'] . '，类型 ' . $a['mime'] . "）\n";
+            }
+            $hint = $hasImage
+                ? "\n\n【用户上传了附件】如需了解图片内容，请调用 read_image 工具（传入 image_id）：\n"
+                : "\n\n【用户上传了附件】如需读取文件内容，请调用 read_file 工具（传入 file_id）：\n";
+            $full[$lastIdx]['content'] .= $hint . $list;
+        }
+    }
 
     $conv = $full;          // 工作消息（含 tool 历史）
     $done = false;
     $toolRounds = 0;
     $allSources = [];
     $toolUnsupported = false;
+    $toolCtx = ['cfg' => $cfg, 'attachments' => $attachments];
 
     while (!$done) {
-        $useTools = ($webTools !== null && $toolRounds < 3) ? $webTools : null;
+        $useTools = ($tools !== null && count($tools) > 0 && $toolRounds < 3) ? $tools : null;
         $okAny = false;
         $toolCalls = null;
         foreach ($order as $idx) {
@@ -636,18 +766,18 @@ case 'generate':
         }
 
         if (!$okAny) {
-            // 全部线路失败：若因不支持 tools → 回退为预注入方式重试
+            // 全部线路失败：若因不支持 tools → 回退为预注入方式重试（仅联网搜索可回退）
             if ($useTools !== null && $toolUnsupported) {
-                $webTools = null;
+                $tools = null;
                 $toolUnsupported = false;
-                inject_web_context($conv, $sse, $allSources);
+                if ($web) inject_web_context($conv, $sse, $allSources);
                 continue;
             }
             break;
         }
 
         if (is_array($toolCalls) && $toolCalls) {
-            // 模型要求搜索 → 执行工具并把结果喂回去继续对话
+            // 模型要求调用工具 → 执行并把结果喂回去继续对话
             $asToolCalls = [];
             foreach ($toolCalls as $tc) {
                 $asToolCalls[] = [
@@ -660,12 +790,10 @@ case 'generate':
             foreach ($toolCalls as $tc) {
                 $args = json_decode((string)$tc['arguments'], true);
                 if (!is_array($args)) $args = [];
-                $result = ($tc['name'] === 'web_search')
-                    ? exec_web_search_tool($args, $allSources)
-                    : '未知工具';
+                $result = exec_tool($tc['name'], $args, $toolCtx, $allSources);
                 $conv[] = ['role' => 'tool', 'tool_call_id' => $tc['id'], 'content' => $result];
             }
-            $sse(['web_results' => $allSources]);
+            if ($allSources) $sse(['web_results' => $allSources]);
             $toolRounds++;
             continue;
         }
@@ -690,6 +818,266 @@ default:
 }
 
 exit;
+
+/* ------------------------------------------------------------------ */
+/* 技能注册表 + 工具分发器                                              */
+/* ------------------------------------------------------------------ */
+
+// 按场景组装工具定义
+function build_tool_defs($web, $hasImage, $hasFile) {
+    $tools = [];
+    if ($web) {
+        $tools[] = [
+            'type' => 'function',
+            'function' => [
+                'name' => 'web_search',
+                'description' => '搜索互联网获取实时信息（最新新闻、产品发布、价格、赛事、天气、时效性事实等）。当用户问题需要最新信息或事实核查时必须调用；query 使用提炼后的简洁关键词。',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'query' => ['type' => 'string', 'description' => '搜索关键词，简洁准确']
+                    ],
+                    'required' => ['query']
+                ]
+            ]
+        ];
+    }
+    if ($hasImage) {
+        $tools[] = [
+            'type' => 'function',
+            'function' => [
+                'name' => 'read_image',
+                'description' => '读取并理解用户上传的图片内容（OCR 识别文字、描述画面、读取图表/截图/照片）。只要用户提到图片内容、想知道图片里有什么，就必须调用此工具。',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'image_id' => ['type' => 'string', 'description' => '图片附件的 id（形如 u_xxx）'],
+                        'question' => ['type' => 'string', 'description' => '针对图片的具体问题，如"图里写了什么字"；留空则整体描述']
+                    ],
+                    'required' => ['image_id']
+                ]
+            ]
+        ];
+    }
+    if ($hasFile) {
+        $tools[] = [
+            'type' => 'function',
+            'function' => [
+                'name' => 'read_file',
+                'description' => '读取用户上传的文档内容（txt/md/csv/json/log/pdf/docx）。只要用户提到文件内容、想总结/翻译/分析文件，就必须调用此工具。',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'file_id' => ['type' => 'string', 'description' => '文件附件的 id（形如 u_xxx）'],
+                        'instruction' => ['type' => 'string', 'description' => '对文件内容的处理要求，如"总结要点"；留空则原样返回']
+                    ],
+                    'required' => ['file_id']
+                ]
+            ]
+        ];
+    }
+    return $tools;
+}
+
+// 工具分发器
+function exec_tool($name, $args, $ctx, &$allSources) {
+    switch ($name) {
+        case 'web_search':
+            return exec_web_search_tool($args, $allSources);
+        case 'read_image':
+            return exec_read_image($args, $ctx);
+        case 'read_file':
+            return exec_read_file($args, $ctx);
+        default:
+            return '未知工具：' . $name;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* read_image：调用多模态线路理解图片                                   */
+/* ------------------------------------------------------------------ */
+function exec_read_image($args, $ctx) {
+    $id = clean_id($args['image_id'] ?? '');
+    $path = UPLOADS_DIR . '/' . $id;
+    $meta = jread($path . '.meta.json', null);
+    if (!is_array($meta) || !is_file($path)) return '错误：找不到 id=' . $id . ' 的图片附件。';
+    $mime = (string)($meta['mime'] ?? 'image/png');
+    if (strpos($mime, 'image/') !== 0) return '错误：id=' . $id . ' 不是图片文件（' . $mime . '）。';
+
+    $size = filesize($path);
+    if ($size > 8 * 1024 * 1024) return '错误：图片过大（' . round($size / 1048576, 1) . 'MB），超出多模态处理能力。';
+
+    $b64 = base64_encode((string)file_get_contents($path));
+    $dataUrl = 'data:' . $mime . ';base64,' . $b64;
+    $question = trim((string)($args['question'] ?? ''));
+    if ($question === '') $question = '请详细描述这张图片的内容，包括其中的文字、物体、场景和任何关键信息。';
+
+    $cfg = $ctx['cfg'];
+    foreach ($cfg['providers'] as $p) {
+        if ($p['url'] === '' || $p['key'] === '' || $p['model'] === '') continue;
+        $result = call_vision($p, $dataUrl, $question);
+        if ($result !== null) return "【图片理解结果（" . $meta['name'] . "）】\n" . $result;
+    }
+    return '错误：所有已配置线路都无法处理该图片（可能不支持多模态，或图片超出模型能力）。请确认至少一条线路支持图像输入。';
+}
+
+// 用 OpenAI 兼容多模态格式调用单条线路，成功返回文本，失败返回 null
+function call_vision($provider, $dataUrl, $question) {
+    $payload = [
+        'model' => $provider['model'],
+        'stream' => false,
+        'messages' => [[
+            'role' => 'user',
+            'content' => [
+                ['type' => 'text', 'text' => $question],
+                ['type' => 'image_url', 'image_url' => ['url' => $dataUrl]]
+            ]
+        ]],
+        'max_tokens' => 2048,
+    ];
+    $ch = curl_init();
+    curl_setopt_array($ch, [
+        CURLOPT_URL            => $provider['url'],
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => json_encode($payload, JSON_UNESCAPED_UNICODE),
+        CURLOPT_HTTPHEADER     => [
+            'Content-Type: application/json',
+            'Authorization: Bearer ' . $provider['key'],
+        ],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_CONNECTTIMEOUT => 15,
+        CURLOPT_TIMEOUT        => 120,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => 0,
+    ]);
+    $resp = curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    curl_close($ch);
+    if ($resp === false || $code < 200 || $code >= 300) return null;
+    $data = json_decode($resp, true);
+    if (!is_array($data) || !isset($data['choices'][0]['message']['content'])) return null;
+    $content = $data['choices'][0]['message']['content'];
+    if (is_array($content)) {
+        // content 可能是分段数组，取文本
+        $txt = '';
+        foreach ($content as $part) {
+            if (is_array($part) && isset($part['text'])) $txt .= $part['text'];
+        }
+        $content = $txt;
+    }
+    $content = trim((string)$content);
+    return $content !== '' ? $content : null;
+}
+
+/* ------------------------------------------------------------------ */
+/* read_file：提取文档文本                                              */
+/* ------------------------------------------------------------------ */
+function exec_read_file($args, $ctx) {
+    $id = clean_id($args['file_id'] ?? '');
+    $path = UPLOADS_DIR . '/' . $id;
+    $meta = jread($path . '.meta.json', null);
+    if (!is_array($meta) || !is_file($path)) return '错误：找不到 id=' . $id . ' 的文件附件。';
+    $ext = strtolower((string)($meta['ext'] ?? ''));
+
+    $text = null;
+    $err = '';
+    switch ($ext) {
+        case 'txt': case 'md': case 'csv': case 'json': case 'log':
+            $raw = (string)file_get_contents($path);
+            $text = ensure_utf8($raw);
+            break;
+        case 'docx':
+            $text = extract_docx($path, $err);
+            break;
+        case 'pdf':
+            $text = extract_pdf($path, $err);
+            break;
+        case 'xlsx': case 'pptx':
+            $err = '暂不支持直接解析 .' . $ext . '，请先导出为 PDF 或文本';
+            break;
+        default:
+            $err = '不支持的文件类型：.' . $ext;
+    }
+
+    if ($text === null) return '错误：无法读取文件 ' . $meta['name'] . '。' . ($err !== '' ? $err : '');
+    $text = trim($text);
+    if ($text === '') return '提示：文件 ' . $meta['name'] . ' 内容为空或无法提取出文本。';
+
+    // 截断避免上下文爆炸
+    $max = 12000;
+    if (function_exists('mb_strlen')) {
+        if (mb_strlen($text) > $max) $text = mb_substr($text, 0, $max) . "\n\n…（内容过长已截断）";
+    } else {
+        if (strlen($text) > $max * 3) $text = substr($text, 0, $max * 3) . "\n\n…（内容过长已截断）";
+    }
+
+    $instruction = trim((string)($args['instruction'] ?? ''));
+    $head = '【文件内容：' . $meta['name'] . '】' . ($instruction !== '' ? "（用户要求：{$instruction}）" : '') . "\n\n";
+    return $head . $text;
+}
+
+// 编码归一：尽量转成 UTF-8
+function ensure_utf8($raw) {
+    if ($raw === '') return '';
+    if (function_exists('mb_check_encoding') && mb_check_encoding($raw, 'UTF-8')) {
+        // 去掉 BOM
+        if (substr($raw, 0, 3) === "\xEF\xBB\xBF") $raw = substr($raw, 3);
+        return $raw;
+    }
+    if (function_exists('mb_convert_encoding')) {
+        $conv = @mb_convert_encoding($raw, 'UTF-8', 'GBK,GB18030,BIG5,UTF-8');
+        if ($conv !== false && $conv !== '') return $conv;
+    }
+    return $raw;
+}
+
+// 解析 docx（ZIP + word/document.xml）
+function extract_docx($path, &$err) {
+    if (!class_exists('ZipArchive')) { $err = '服务器缺少 ZipArchive 扩展'; return null; }
+    $zip = new ZipArchive();
+    if ($zip->open($path) !== true) { $err = 'docx 文件损坏或无法打开'; return null; }
+    $xml = $zip->getFromName('word/document.xml');
+    $zip->close();
+    if ($xml === false) { $err = 'docx 内未找到正文'; return null; }
+    // 段落/换行/制表符 → 换行
+    $xml = preg_replace('/<\/w:p>/', "\n", $xml);
+    $xml = preg_replace('/<w:tab[^>]*\/>/', "\t", $xml);
+    $xml = preg_replace('/<w:br[^>]*\/>/', "\n", $xml);
+    $text = strip_tags($xml);
+    $text = html_entity_decode($text, ENT_QUOTES | ENT_XML1, 'UTF-8');
+    $text = preg_replace('/\n{3,}/', "\n\n", $text);
+    return trim($text);
+}
+
+// 解析 pdf：优先 pdftotext，其次 PHP 粗略提取
+function extract_pdf($path, &$err) {
+    // 1) pdftotext（最可靠）
+    $bin = trim((string)shell_exec('command -v pdftotext 2>/dev/null'));
+    if ($bin !== '') {
+        $cmd = escapeshellarg($bin) . ' -enc UTF-8 ' . escapeshellarg($path) . ' - 2>/dev/null';
+        $out = shell_exec($cmd);
+        if ($out !== null && trim($out) !== '') return $out;
+    }
+    // 2) 粗略提取：解压缩 PDF 内容流里的文本（仅对未压缩/部分有效，兜底用）
+    $raw = (string)file_get_contents($path);
+    $text = '';
+    if (preg_match_all('/BT([\s\S]*?)ET/', $raw, $m)) {
+        foreach ($m[1] as $seg) {
+            if (preg_match_all('/\((?:[^()\\\\]|\\\\.)*\)/', $seg, $t)) {
+                foreach ($t[0] as $s) {
+                    $s = substr($s, 1, -1);
+                    $s = str_replace(['\\(', '\\)', '\\\\'], ['(', ')', '\\'], $s);
+                    $text .= $s;
+                }
+                $text .= "\n";
+            }
+        }
+    }
+    $text = trim($text);
+    if ($text === '') { $err = '无法提取 PDF 文本（建议服务器安装 pdftotext：apt install poppler-utils）'; return null; }
+    return $text;
+}
 
 /* ------------------------------------------------------------------ */
 /* 联网搜索工具执行 + 预注入兜底                                       */

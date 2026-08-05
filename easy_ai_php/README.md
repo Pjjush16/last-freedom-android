@@ -15,7 +15,11 @@
 
 **聊天核心**
 - SSE 流式输出、深度思考（reasoning_content）折叠展示
-- **联网搜索（免 Key，Tools 方案）**：输入框地球图标开关。开启后后端向模型注册 `web_search` 工具，由模型自主决定要不要搜、提炼搜索关键词（普通问题不触发搜索，零延迟）；后端执行搜索（DuckDuckGo HTML 为主、Bing 兜底）+ 抓取前 4 条结果正文，回喂模型生成带 [n] 来源标注的回答；最多 3 轮工具调用。若线路不支持 Tools（返回相关报错）自动回退为预注入模式。回复上方展示可点击的来源卡片
+- **技能系统（Tools 方案）**：后端向模型注册工具，由模型自主决定何时调用、传什么参数，最多 3 轮工具循环；线路不支持 Tools 时联网搜索自动回退预注入模式。已内置技能：
+  - **web_search 联网搜索（免 Key）**：DuckDuckGo HTML 为主、Bing 兜底，抓取前 4 条结果正文回喂模型，回复带 [n] 来源标注 + 来源卡片
+  - **read_image 看图**：回形针按钮上传图片/文件，图片走多模态接口理解（OCR、描述、读图），纯文本模型也能"看图"
+  - **read_file 读文档**：txt/md/csv/json/log 直读，docx 用 ZipArchive 解析，pdf 优先 pdftotext（建议 `apt install poppler-utils`）
+- 附件支持拖拽上传、图片缩略图预览、历史重载恢复；单文件限 15MB
 - 停止生成 / 重新生成 / 复制消息
 - 多线路自动故障转移；也可在模型选择器指定单条线路
 - **多模型并排对比**：勾选 2~3 个模型，同一问题并行提问、分栏展示
@@ -31,12 +35,15 @@
 - KaTeX 数学公式（$行内$ / $$块级$$）
 - 原项目特色：🎵 Web Audio 物理建模作曲（14 类乐器引擎）、🎨 【photo】SVG 绘图
 
+**扩展新技能**：在 api.php 的 `build_tool_defs()` 里加一条工具定义，在 `exec_tool()` 里加一个分支函数即可，前端无需改动。
+
 ## 部署
 
-- 环境：PHP >= 7.4 + curl 扩展（不强依赖 mbstring）。无框架、无数据库。
-- 两个文件放同一目录，`data/` 自动创建。
-- 本地体验：`php -S 0.0.0.0:8080`，打开 `http://localhost:8080`。
-- 生产建议 Nginx/Apache + PHP-FPM；Nginx 反代需加 `proxy_buffering off;`（SSE 需要）。
+- 环境：PHP >= 7.4 + curl 扩展（docx 解析需 zip 扩展；不强依赖 mbstring）。无框架、无数据库。
+- 两个文件放同一目录，`data/` 自动创建（配置、会话、上传文件都在里面，注意备份和访问控制）。
+- 本地体验：`php -S 0.0.0.0:8080 -d upload_max_filesize=20M -d post_max_size=25M`，打开 `http://localhost:8080`。
+- 生产建议 Nginx/Apache + PHP-FPM；Nginx 反代需加 `proxy_buffering off;`（SSE 需要），并在 php.ini 调大 `upload_max_filesize` / `post_max_size`。
+- 可选：`apt install poppler-utils`（pdftotext）获得更好的 PDF 文本提取。
 
 ## 使用
 
@@ -61,8 +68,12 @@
 | `prompts` | GET | 提示词列表 |
 | `prompt_save` | POST | 新建 / 更新提示词 |
 | `prompt_delete` | POST | 删除提示词 |
+| `upload` | POST | 上传附件（multipart，字段 file，限 15MB） |
+| `file` | GET | 读取已上传文件（预览/下载，`?download=1`） |
+| `uploads` | GET | 上传文件列表 |
+| `upload_delete` | POST | 删除上传文件 |
 | `websearch` | GET | 独立网页搜索（调试用），`?q=` |
-| `generate` | POST | 流式生成（SSE，支持 provider 指定 + strict 单线路 + web 联网搜索） |
+| `generate` | POST | 流式生成（SSE，支持 provider 指定 + strict 单线路 + web 联网 + attachments 附件技能） |
 
 ## 安全说明
 

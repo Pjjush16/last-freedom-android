@@ -453,6 +453,27 @@ body.light .mermaid-wrap{background:#fff}
 .ws-label svg.ic{width:13px;height:13px}
 .ws-chip{font-size:11.5px;color:var(--gray-400);border:1px solid var(--gray-750);border-radius:99px;padding:3px 10px;text-decoration:none;max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:background .15s,color .15s,border-color .15s}
 .ws-chip:hover{background:var(--hover);color:var(--gray-100);border-color:var(--gray-600)}
+
+/* 附件栏（输入框上方） */
+.attach-bar{display:flex;flex-wrap:wrap;gap:8px;padding:0 2px}
+.attach-bar:empty{display:none}
+.attach-bar:not(:empty){padding-bottom:8px}
+.attach-chip{position:relative;display:flex;align-items:center;gap:8px;padding:6px 26px 6px 8px;border-radius:11px;background:var(--gray-750);border:1px solid var(--gray-700);max-width:230px;animation:msgIn .25s ease both}
+.attach-chip img{width:40px;height:40px;object-fit:cover;border-radius:7px;flex-shrink:0;display:block}
+.attach-chip .ficon{width:40px;height:40px;border-radius:7px;background:var(--gray-700);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--gray-300)}
+.attach-chip .ficon svg.ic{width:19px;height:19px}
+.attach-chip .fmeta{min-width:0;display:flex;flex-direction:column;gap:1px}
+.attach-chip .fname{font-size:12px;color:var(--gray-100);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+.attach-chip .fsize{font-size:10.5px;color:var(--gray-500)}
+.attach-chip .frm{position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;border:none;background:var(--gray-600);color:var(--gray-100);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;line-height:1;transition:background .15s}
+.attach-chip .frm:hover{background:var(--danger)}
+.attach-chip.uploading{opacity:.6}
+.attach-chip.error{border-color:var(--danger)}
+/* 用户气泡里的图片/文件 */
+.bubble .bimg{display:block;max-width:240px;max-height:240px;border-radius:9px;margin-top:6px;cursor:zoom-in}
+.bubble .bfile{display:inline-flex;align-items:center;gap:6px;margin-top:6px;padding:5px 10px;border-radius:8px;background:rgba(0,0,0,.14);font-size:12.5px;color:inherit}
+body.light .bubble .bfile{background:rgba(0,0,0,.06)}
+.bubble .bfile svg.ic{width:14px;height:14px}
 .input-box{flex-direction:column;align-items:stretch;padding:8px 10px 8px 12px}
 .input-box .ib-row{display:flex;align-items:flex-end;gap:8px}
 .input-box .ib-row #input{flex:1}
@@ -554,6 +575,7 @@ body.share-mode .msg-actions{display:none !important}
         <div class="prompt-bar" id="promptBar"></div>
         <div class="ctx" id="promptPop"></div>
         <div class="input-box">
+          <div class="attach-bar" id="attachBar"></div>
           <div class="ib-row">
             <textarea id="input" rows="1" placeholder="给 Easy AI 发送消息（Shift+Enter 换行）" autocomplete="off"></textarea>
             <button class="send-btn" id="btnSend" title="发送">
@@ -561,7 +583,10 @@ body.share-mode .msg-actions{display:none !important}
             </button>
           </div>
           <div class="input-tools">
-            <button class="tool-btn" id="btnWeb" title="联网搜索：回答前先搜网页">
+            <button class="tool-btn" id="btnAttach" title="上传图片或文件">
+              <svg class="ic" viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+            </button>
+            <button class="tool-btn" id="btnWeb" title="联网搜索：模型按需自动搜网页">
               <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
             </button>
             <button class="tool-btn" id="btnPrompts" title="提示词库">
@@ -654,6 +679,7 @@ body.share-mode .msg-actions{display:none !important}
 <div class="ctx" id="ctxMenu"></div>
 
 <div id="toast"></div>
+<input type="file" id="fileInput" multiple accept="image/*,.txt,.md,.csv,.json,.log,.pdf,.docx" style="display:none">
 
 <script>
 'use strict';
@@ -1000,6 +1026,7 @@ let collapsedFolders=new Set(JSON.parse(localStorage.getItem('ea_folders_closed'
 let miniOkCb=null;
 let searchTimer=null;
 let webEnabled=localStorage.getItem('ea_web')==='1';
+let pendingAttachments=[];
 
 const boxEl=$('#messages'), welcomeEl=$('#welcome'), scrollEl=$('#chatScroll');
 const inputEl=$('#input'), btnSend=$('#btnSend');
@@ -1131,14 +1158,35 @@ function makeActions(content){
   bar.children[1].addEventListener('click',()=>regenerate());
   return bar;
 }
-function appendUser(text){
+function appendUser(text,atts){
   const d=document.createElement('div');
   d.className='msg-user';
-  const b=document.createElement('div');b.className='bubble';b.textContent=text;
+  const b=document.createElement('div');b.className='bubble';
+  if(text){const t=document.createElement('div');t.textContent=text;b.appendChild(t);}
+  (atts||[]).forEach(a=>{
+    if((a.mime||'').startsWith('image/')){
+      const img=document.createElement('img');
+      img.className='bimg';img.src=API+'?action=file&id='+encodeURIComponent(a.id);img.alt=a.name||'image';
+      img.addEventListener('click',()=>window.open(img.src,'_blank'));
+      b.appendChild(img);
+    }else{
+      const f=document.createElement('span');f.className='bfile';
+      f.innerHTML='<svg class="ic" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>';
+      const nm=document.createElement('span');nm.textContent=a.name||'file';f.appendChild(nm);
+      b.appendChild(f);
+    }
+  });
   d.appendChild(b);boxEl.appendChild(d);
   scrollBottom();
   return d;
 }
+// 从消息内容里解析附件标记 [[att:id:name:mime]]
+function parseUserContent(content){
+  const atts=[];
+  const clean=String(content||'').replace(/\[\[att:([A-Za-z0-9_]+):([^\]\n:]+):([^\]\n]+)\]\]\n?/g,(_,id,name,mime)=>{atts.push({id,name,mime});return '';});
+  return{text:clean.trim(),atts};
+}
+const stripAtt=s=>String(s||'').replace(/\[\[att:[^\]]+\]\]\n?/g,'');
 function appendAssistantShell(){
   const d=document.createElement('div');
   d.className='msg-assistant';
@@ -1207,16 +1255,22 @@ function updateInputUI(){
 
 async function send(text,regen){
   text=(text!==undefined?text:inputEl.value).trim();
-  if(!text||streaming)return;
+  const atts=regen?[]:pendingAttachments.slice();
+  if(streaming)return;
+  if(!text&&!atts.length)return;
+  if(!text)text='请看上传的附件。';
   const usable=(CONFIG&&CONFIG.providers||[]).filter(p=>p.url&&p.model&&p.key);
   if(!usable.length){toast('请先在设置中配置 API 线路');openSettings();return}
 
   showWelcome(false);
   if(!regen){
-    messages.push({role:'user',content:text});
-    appendUser(text);
+    let content=text;
+    atts.forEach(a=>{content+='\n[[att:'+a.id+':'+String(a.name).replace(/[:\]\[\n]/g,'_')+':'+(a.mime||'')+']]'});
+    messages.push({role:'user',content});
+    appendUser(text,atts);
   }
   inputEl.value='';autoResize();updateInputUI();
+  if(!regen){pendingAttachments=[];renderAttachBar();}
 
   const el=appendAssistantShell();
   const body=el.querySelector('.body');
@@ -1230,7 +1284,7 @@ async function send(text,regen){
     const resp=await fetch(API+'?action=generate',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({messages:messages.map(m=>({role:m.role,content:m.content})),provider:activeProvider,web:webEnabled}),
+      body:JSON.stringify({messages:messages.map(m=>({role:m.role,content:stripAtt(m.content)})),provider:activeProvider,web:webEnabled,attachments:atts.map(a=>({id:a.id}))}),
       signal:aborter.signal
     });
     if(!resp.ok||!resp.body){
@@ -1323,14 +1377,20 @@ async function send(text,regen){
  * ================================================================== */
 async function sendCompare(text){
   text=(text!==undefined?text:inputEl.value).trim();
-  if(!text||streaming)return;
+  const atts=pendingAttachments.slice();
+  if(!text&&!atts.length)return;
+  if(streaming)return;
+  if(!text)text='请看上传的附件。';
   const usable=(CONFIG&&CONFIG.providers||[]).filter(p=>p.url&&p.model&&p.key);
   if(!usable.length){toast('请先在设置中配置 API 线路');openSettings();return}
 
   showWelcome(false);
-  messages.push({role:'user',content:text});
-  appendUser(text);
+  let content=text;
+  atts.forEach(a=>{content+='\n[[att:'+a.id+':'+String(a.name).replace(/[:\]\[\n]/g,'_')+':'+(a.mime||'')+']]'});
+  messages.push({role:'user',content});
+  appendUser(text,atts);
   inputEl.value='';autoResize();updateInputUI();
+  pendingAttachments=[];renderAttachBar();
 
   const idxs=[...selectedModels].filter(i=>CONFIG.providers[i]&&CONFIG.providers[i].url);
   const grid=document.createElement('div');grid.className='cmp-grid';
@@ -1358,7 +1418,16 @@ async function sendCompare(text){
 }
 
 async function streamColumn(c){
-  const payload={messages:messages.map(m=>({role:m.role,content:m.content})),provider:c.i,strict:true};
+  // 从最后一条用户消息的标记里提取附件 id，供后端启用 read_image/read_file
+  const _attIds=[];
+  for(let _i=messages.length-1;_i>=0;_i--){
+    if(messages[_i].role==='user'){
+      let _mm;const _re=/\[\[att:([A-Za-z0-9_]+):/g;
+      while((_mm=_re.exec(messages[_i].content))!==null)_attIds.push({id:_mm[1]});
+      break;
+    }
+  }
+  const payload={messages:messages.map(m=>({role:m.role,content:stripAtt(m.content)})),provider:c.i,strict:true,attachments:_attIds};
   let thinkBlock=null,contentStarted=false,errMsg='';
   try{
     const resp=await fetch(API+'?action=generate',{
@@ -1445,7 +1514,7 @@ function regenerate(){
   let i=messages.length-1;
   while(i>=0&&messages[i].role!=='user')i--;
   if(i<0)return;
-  const txt=messages[i].content;
+  const txt=stripAtt(messages[i].content);
   messages=messages.slice(0,i+1);
   // 移除最后一条 assistant DOM
   const all=boxEl.querySelectorAll('.msg-assistant');
@@ -1663,7 +1732,7 @@ async function openChat(id){
     boxEl.innerHTML='';
     showWelcome(false);
     messages.forEach(m=>{
-      if(m.role==='user')appendUser(m.content);
+      if(m.role==='user'){const _u=parseUserContent(m.content);appendUser(_u.text,_u.atts);}
       else appendAssistantFinal(m);
     });
     renderChatList();
@@ -1939,6 +2008,80 @@ $('#searchInput').addEventListener('input',e=>{
 });
 
 /* ==================================================================
+ * 附件上传（图片/文件 → read_image / read_file 工具）
+ * ================================================================== */
+function fmtSize(n){
+  if(n<1024)return n+'B';
+  if(n<1048576)return(n/1024).toFixed(1)+'KB';
+  return(n/1048576).toFixed(1)+'MB';
+}
+function renderAttachBar(){
+  const bar=$('#attachBar');
+  bar.innerHTML='';
+  pendingAttachments.forEach((a,i)=>{
+    const chip=document.createElement('div');
+    chip.className='attach-chip'+(a.uploading?' uploading':'')+(a.error?' error':'');
+    const isImg=(a.mime||'').startsWith('image/');
+    if(isImg&&a.url){
+      const img=document.createElement('img');img.src=a.url;img.alt=a.name||'';
+      chip.appendChild(img);
+    }else{
+      const fi=document.createElement('div');fi.className='ficon';
+      fi.innerHTML='<svg class="ic" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>';
+      chip.appendChild(fi);
+    }
+    const meta=document.createElement('div');meta.className='fmeta';
+    meta.innerHTML='<span class="fname"></span><span class="fsize"></span>';
+    meta.querySelector('.fname').textContent=a.name||'文件';
+    meta.querySelector('.fsize').textContent=a.uploading?'上传中…':(a.error?'上传失败':fmtSize(a.size||0));
+    chip.appendChild(meta);
+    const rm=document.createElement('button');rm.className='frm';rm.title='移除';rm.textContent='✕';
+    rm.addEventListener('click',()=>{pendingAttachments.splice(i,1);renderAttachBar();});
+    chip.appendChild(rm);
+    bar.appendChild(chip);
+  });
+}
+async function uploadOne(file){
+  const item={name:file.name,size:file.size,mime:file.type||'',uploading:true};
+  pendingAttachments.push(item);
+  renderAttachBar();
+  try{
+    const fd=new FormData();
+    fd.append('file',file);
+    const resp=await fetch(API+'?action=upload',{method:'POST',body:fd});
+    const d=await resp.json();
+    if(!d.ok)throw new Error(d.error||'上传失败');
+    item.id=d.id;item.mime=d.mime||item.mime;item.size=d.size||item.size;
+    item.url=API+'?action=file&id='+encodeURIComponent(d.id);
+    item.uploading=false;
+  }catch(e){
+    item.uploading=false;item.error=true;
+    toast('上传失败：'+e.message);
+  }
+  renderAttachBar();
+}
+$('#btnAttach').addEventListener('click',()=>$('#fileInput').click());
+$('#fileInput').addEventListener('change',async e=>{
+  const files=Array.from(e.target.files||[]);
+  e.target.value='';
+  if(!files.length)return;
+  const usable=(CONFIG&&CONFIG.providers||[]).filter(p=>p.url&&p.model&&p.key);
+  if(!usable.length){toast('请先在设置中配置 API 线路');openSettings();return}
+  for(const f of files){
+    if(f.size>15*1024*1024){toast('「'+f.name+'」超过 15MB，已跳过');continue}
+    await uploadOne(f);
+  }
+  inputEl.focus();
+});
+// 支持拖拽上传
+document.addEventListener('dragover',e=>e.preventDefault());
+document.addEventListener('drop',async e=>{
+  e.preventDefault();
+  const files=Array.from(e.dataTransfer.files||[]);
+  for(const f of files)await uploadOne(f);
+});
+
+/* ==================================================================
  * 工具栏：联网搜索 / 导出 / 分享
  * ================================================================== */
 function syncWebBtn(){
@@ -1981,7 +2124,7 @@ async function initShareMode(token){
     document.title=(s.title||'分享对话')+' · Easy AI';
     showWelcome(false);
     (s.messages||[]).forEach(m=>{
-      if(m.role==='user')appendUser(m.content);
+      if(m.role==='user'){const _u=parseUserContent(m.content);appendUser(_u.text,_u.atts);}
       else appendAssistantFinal(m);
     });
     scrollBottom();
