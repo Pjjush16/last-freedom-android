@@ -1,0 +1,1225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
+<title>Easy AI</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='40' fill='%23327ac2'/></svg>">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+/* ============ Open WebUI 风格暗色主题 ============ */
+:root{
+  --gray-950:#0d0d0d;
+  --gray-900:#17181c;
+  --gray-850:#26272b;
+  --gray-800:#333;
+  --gray-750:#3a3b42;
+  --gray-700:#44464e;
+  --gray-600:#62667a;
+  --gray-500:#8e92a4;
+  --gray-400:#a5a8b8;
+  --gray-300:#c4c7d4;
+  --gray-100:#ececf1;
+  --accent:#327ac2;
+  --accent-2:#7c3aed;
+  --danger:#ef4444;
+  --sidebar-w:276px;
+  --radius:16px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,sans-serif;
+  background:var(--gray-850);color:var(--gray-100);
+  overflow:hidden;-webkit-font-smoothing:antialiased;
+}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-thumb{background:var(--gray-700);border-radius:3px}
+::-webkit-scrollbar-track{background:transparent}
+button{font-family:inherit}
+svg.ic{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+
+#app{display:flex;height:100dvh;width:100%}
+
+/* ============ 侧边栏 ============ */
+#sidebar{
+  width:var(--sidebar-w);background:var(--gray-900);
+  display:flex;flex-direction:column;flex-shrink:0;
+  transition:margin-left .28s cubic-bezier(.4,0,.2,1);
+  border-right:1px solid rgba(255,255,255,.03);
+  z-index:60;
+}
+#app.sb-collapsed #sidebar{margin-left:calc(-1 * var(--sidebar-w))}
+.sb-head{display:flex;align-items:center;gap:8px;padding:12px 12px 8px}
+.brand{display:flex;align-items:center;gap:10px;flex:1;min-width:0;cursor:pointer;background:none;border:none;color:var(--gray-100);padding:6px;border-radius:10px;text-align:left}
+.brand:hover{background:rgba(255,255,255,.05)}
+.brand-name{font-weight:600;font-size:15px;letter-spacing:.3px;white-space:nowrap}
+.icon-btn{
+  width:34px;height:34px;border-radius:9px;border:none;background:transparent;
+  color:var(--gray-500);cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:background .15s,color .15s;flex-shrink:0;
+}
+.icon-btn:hover{background:rgba(255,255,255,.08);color:var(--gray-100)}
+.new-chat{
+  margin:4px 12px 10px;display:flex;align-items:center;gap:9px;
+  padding:10px 12px;border-radius:11px;cursor:pointer;
+  background:var(--gray-850);border:1px solid var(--gray-750);
+  color:var(--gray-100);font-size:13.5px;font-weight:500;
+  transition:border-color .18s,background .18s,box-shadow .18s;
+}
+.new-chat:hover{border-color:var(--gray-600);background:#2b2c31;box-shadow:0 2px 14px rgba(0,0,0,.35)}
+.new-chat svg.ic{width:16px;height:16px;color:var(--gray-400)}
+.sb-search{margin:0 12px 8px;position:relative;display:none}
+.sb-search input{width:100%;padding:8px 12px 8px 34px;border-radius:9px;border:1px solid var(--gray-750);background:var(--gray-850);color:var(--gray-100);font-size:13px;outline:none}
+.chat-list{flex:1;overflow-y:auto;padding:2px 8px 8px}
+.group-label{font-size:11.5px;color:var(--gray-500);padding:12px 10px 5px;font-weight:500}
+.chat-item{
+  display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:9px;
+  cursor:pointer;font-size:13.5px;color:var(--gray-300);position:relative;
+  transition:background .15s;user-select:none;
+}
+.chat-item:hover{background:rgba(255,255,255,.06)}
+.chat-item.active{background:rgba(255,255,255,.09);color:var(--gray-100)}
+.chat-item .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chat-item .del{opacity:0;width:26px;height:26px;border:none;border-radius:7px;background:transparent;color:var(--gray-500);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:opacity .15s,background .15s,color .15s}
+.chat-item:hover .del{opacity:1}
+.chat-item .del:hover{background:rgba(239,68,68,.15);color:var(--danger)}
+.chat-item .del svg.ic{width:15px;height:15px}
+.empty-hint{color:var(--gray-600);font-size:12.5px;text-align:center;padding:26px 12px;line-height:1.7}
+.sb-foot{padding:10px 12px;border-top:1px solid rgba(255,255,255,.05)}
+.sb-foot-btn{display:flex;align-items:center;gap:10px;width:100%;padding:9px 10px;border-radius:9px;border:none;background:transparent;color:var(--gray-300);font-size:13.5px;cursor:pointer;transition:background .15s;text-align:left}
+.sb-foot-btn:hover{background:rgba(255,255,255,.07)}
+
+/* 迷你光球（品牌 logo） */
+.orb{position:relative;width:26px;height:26px;flex-shrink:0}
+.orb::before{content:'';position:absolute;inset:-2px;border-radius:50%;
+  background:conic-gradient(from 0deg,var(--accent),var(--accent-2),#ec4899,#f59e0b,var(--accent));
+  animation:orbSpin 4.5s linear infinite;filter:blur(3px);opacity:.95}
+.orb::after{content:'';position:absolute;inset:5px;border-radius:50%;background:var(--gray-900)}
+.orb.lg{width:64px;height:64px}
+.orb.lg::before{inset:-4px;filter:blur(7px)}
+.orb.lg::after{inset:11px;background:var(--gray-850)}
+.orb .spark{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:2;color:#fff}
+.orb .spark svg.ic{width:55%;height:55%;fill:#fff;stroke:none;animation:sparkPulse 2.6s ease-in-out infinite}
+@keyframes orbSpin{to{transform:rotate(360deg)}}
+@keyframes sparkPulse{0%,100%{transform:scale(.92);opacity:.85}50%{transform:scale(1.08);opacity:1}}
+
+/* ============ 主区域 ============ */
+#main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
+.topbar{height:54px;display:flex;align-items:center;gap:6px;padding:0 14px;flex-shrink:0}
+.model-sel{position:relative}
+.model-btn{
+  display:flex;align-items:center;gap:7px;padding:7px 12px;border-radius:10px;border:none;
+  background:transparent;color:var(--gray-100);font-size:15px;font-weight:600;cursor:pointer;
+  transition:background .15s;max-width:56vw;
+}
+.model-btn:hover{background:rgba(255,255,255,.06)}
+.model-btn .sub{color:var(--gray-500);font-weight:400;font-size:12.5px}
+.model-btn svg.ic{width:14px;height:14px;color:var(--gray-500);transition:transform .2s}
+.model-sel.open .model-btn svg.chev{transform:rotate(180deg)}
+.model-menu{
+  position:absolute;top:calc(100% + 6px);left:0;min-width:300px;max-width:86vw;
+  background:var(--gray-800);border:1px solid var(--gray-700);border-radius:13px;
+  box-shadow:0 12px 40px rgba(0,0,0,.55);padding:6px;z-index:80;
+  opacity:0;transform:translateY(-6px) scale(.98);pointer-events:none;
+  transition:opacity .16s,transform .16s;
+}
+.model-sel.open .model-menu{opacity:1;transform:none;pointer-events:auto}
+.model-item{padding:9px 12px;border-radius:9px;cursor:pointer;transition:background .12s}
+.model-item:hover{background:rgba(255,255,255,.07)}
+.model-item .nm{font-size:13.5px;font-weight:500;display:flex;align-items:center;gap:7px}
+.model-item .ds{font-size:12px;color:var(--gray-500);margin-top:2px}
+.model-item.on .nm::after{content:'✓';margin-left:auto;color:var(--accent)}
+.top-status{margin-left:auto;font-size:12px;color:var(--gray-500);display:flex;align-items:center;gap:6px;opacity:0;transition:opacity .3s}
+.top-status.show{opacity:1}
+.top-status .dot{width:7px;height:7px;border-radius:50%;background:#22c55e;animation:blink 1.2s ease-in-out infinite}
+@keyframes blink{50%{opacity:.3}}
+
+/* ---- 消息区 ---- */
+#chatScroll{flex:1;overflow-y:auto;scroll-behavior:smooth}
+.thread{max-width:46rem;margin:0 auto;padding:10px 16px 30px}
+
+/* 欢迎页 */
+#welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:calc(100dvh - 220px);animation:fadeUp .5s ease both}
+#welcome h1{font-size:26px;font-weight:600;margin:22px 0 6px;letter-spacing:.5px}
+#welcome .sub{color:var(--gray-500);font-size:13.5px;margin-bottom:30px}
+.sugg{display:grid;grid-template-columns:1fr 1fr;gap:10px;width:100%;max-width:560px}
+.sugg-card{
+  display:flex;align-items:flex-start;gap:11px;padding:13px 15px;border-radius:13px;cursor:pointer;
+  background:transparent;border:1px solid var(--gray-750);text-align:left;color:var(--gray-300);
+  font-size:13px;line-height:1.5;transition:background .18s,border-color .18s,transform .18s;
+}
+.sugg-card:hover{background:#2b2c31;border-color:var(--gray-600);transform:translateY(-2px)}
+.sugg-card .em{font-size:19px;line-height:1;margin-top:1px}
+@keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+
+/* 消息 */
+.msg-user{display:flex;justify-content:flex-end;margin:18px 0;animation:msgIn .3s ease both}
+.msg-user .bubble{
+  background:var(--gray-800);border:1px solid rgba(255,255,255,.04);
+  padding:11px 17px;border-radius:20px;border-bottom-right-radius:7px;
+  max-width:86%;font-size:14.5px;line-height:1.65;white-space:pre-wrap;word-break:break-word;
+}
+.msg-assistant{display:flex;gap:12px;margin:22px 0;animation:msgIn .35s ease both}
+.msg-assistant .ava{
+  width:30px;height:30px;border-radius:50%;flex-shrink:0;margin-top:2px;
+  background:conic-gradient(from 210deg,var(--accent),var(--accent-2),#ec4899,var(--accent));
+  display:flex;align-items:center;justify-content:center;color:#fff;
+  box-shadow:0 0 14px rgba(50,122,194,.35);
+}
+.msg-assistant .ava svg.ic{width:16px;height:16px;fill:#fff;stroke:none}
+.msg-assistant .body{flex:1;min-width:0;font-size:14.5px;line-height:1.7}
+@keyframes msgIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+/* markdown 内容 */
+.markdown{word-break:break-word}
+.markdown>*+*{margin-top:.7em}
+.markdown p{line-height:1.75}
+.markdown h1,.markdown h2,.markdown h3,.markdown h4{margin-top:1.1em;font-weight:600;line-height:1.4}
+.markdown h1{font-size:1.35em}.markdown h2{font-size:1.2em}.markdown h3{font-size:1.08em}
+.markdown ul,.markdown ol{padding-left:1.5em}
+.markdown li{margin:.28em 0}
+.markdown a{color:var(--accent);text-decoration:none}
+.markdown a:hover{text-decoration:underline}
+.markdown code{background:rgba(255,255,255,.08);padding:2px 6px;border-radius:5px;font-size:.88em;font-family:ui-monospace,Menlo,Consolas,monospace}
+.markdown pre{background:var(--gray-950);border:1px solid rgba(255,255,255,.06);border-radius:11px;padding:13px 15px;overflow-x:auto;margin:.8em 0}
+.markdown pre code{background:none;padding:0;font-size:12.8px;line-height:1.6;color:#d6deeb}
+.markdown blockquote{border-left:3px solid var(--gray-700);padding-left:12px;color:var(--gray-400)}
+.markdown table{border-collapse:collapse;display:block;overflow-x:auto;max-width:100%}
+.markdown th,.markdown td{border:1px solid var(--gray-700);padding:6px 12px;font-size:.92em}
+.markdown th{background:var(--gray-800)}
+.markdown hr{border:none;border-top:1px solid var(--gray-700);margin:1.2em 0}
+.markdown svg{max-width:100%;height:auto;border-radius:10px}
+
+/* 思考过程 */
+.think-block{margin-bottom:10px}
+.think-head{display:flex;align-items:center;gap:6px;color:var(--gray-500);font-size:12.5px;cursor:pointer;user-select:none;width:fit-content;padding:3px 0;transition:color .15s}
+.think-head:hover{color:var(--gray-300)}
+.think-head svg.ic{width:13px;height:13px;transition:transform .25s}
+.think-block.open .think-head svg.ic{transform:rotate(90deg)}
+.think-wrap{display:grid;grid-template-rows:0fr;transition:grid-template-rows .3s ease}
+.think-block.open .think-wrap{grid-template-rows:1fr}
+.think-inner{overflow:hidden}
+.think-body{
+  color:var(--gray-500);font-size:12.8px;line-height:1.7;white-space:pre-wrap;word-break:break-word;
+  border-left:2px solid var(--gray-700);padding:4px 0 4px 13px;margin-top:6px;
+  max-height:300px;overflow-y:auto;
+}
+.think-dots{display:inline-flex;gap:4px;margin-left:4px}
+.think-dots i{width:5px;height:5px;border-radius:50%;background:var(--gray-500);animation:dotJump 1.2s infinite}
+.think-dots i:nth-child(2){animation-delay:.15s}
+.think-dots i:nth-child(3){animation-delay:.3s}
+@keyframes dotJump{0%,60%,100%{transform:none;opacity:.4}30%{transform:translateY(-4px);opacity:1}}
+
+/* 流式光标 */
+.cursor{display:inline-block;width:8px;height:16px;background:var(--accent);border-radius:2px;vertical-align:-2px;margin-left:2px;animation:curBlink 1s steps(2) infinite}
+@keyframes curBlink{50%{opacity:0}}
+
+/* 音频气泡 */
+.audio-row{display:flex;align-items:center;gap:8px;margin:.55em 0;max-width:360px}
+.voice-bubble{
+  display:flex;align-items:center;gap:10px;padding:11px 15px;cursor:pointer;min-width:120px;flex:1;
+  border-radius:16px;background:var(--gray-800);border:1px solid rgba(255,255,255,.06);
+  transition:background .15s,border-color .15s;
+}
+.voice-bubble:hover{background:var(--gray-750);border-color:var(--gray-600)}
+.voice-icon{font-size:17px;line-height:1}
+.voice-bar{flex:1;height:4px;background:var(--gray-700);border-radius:2px;overflow:hidden;min-width:44px}
+.voice-bar-inner{height:100%;width:0;border-radius:2px;background:linear-gradient(90deg,var(--accent),var(--accent-2));transition:width .1s linear}
+.voice-duration{font-size:12px;color:var(--gray-500);min-width:34px;text-align:right}
+.loop-btn{
+  width:34px;height:34px;border-radius:50%;border:1px solid var(--gray-700);background:var(--gray-800);
+  color:var(--gray-500);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  transition:all .18s;
+}
+.loop-btn:hover{border-color:var(--gray-500);color:var(--gray-100)}
+.loop-btn.active{border-color:var(--accent);color:var(--accent);box-shadow:0 0 10px rgba(50,122,194,.4)}
+
+/* 消息操作条 */
+.msg-actions{display:flex;gap:2px;margin-top:8px;opacity:0;transition:opacity .2s}
+.msg-assistant:hover .msg-actions{opacity:1}
+.msg-actions button{
+  width:29px;height:29px;border-radius:8px;border:none;background:transparent;color:var(--gray-500);
+  cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s,color .15s;
+}
+.msg-actions button:hover{background:rgba(255,255,255,.08);color:var(--gray-100)}
+.msg-actions button svg.ic{width:15px;height:15px}
+
+.err-bubble{color:#fca5a5;background:rgba(239,68,68,.09);border:1px solid rgba(239,68,68,.25);padding:10px 14px;border-radius:12px;font-size:13.5px;line-height:1.6}
+
+/* ---- 输入区 ---- */
+.input-area{flex-shrink:0;padding:4px 16px 10px}
+.input-wrap{max-width:46rem;margin:0 auto}
+.input-box{
+  display:flex;align-items:flex-end;gap:8px;padding:9px 10px 9px 18px;
+  background:var(--gray-800);border:1px solid var(--gray-750);border-radius:26px;
+  transition:border-color .2s,box-shadow .2s;
+}
+.input-box:focus-within{border-color:var(--gray-600);box-shadow:0 4px 24px rgba(0,0,0,.35)}
+#input{
+  flex:1;background:transparent;border:none;outline:none;resize:none;
+  color:var(--gray-100);font-size:14.5px;line-height:1.55;font-family:inherit;
+  max-height:200px;padding:5px 0;
+}
+#input::placeholder{color:var(--gray-600)}
+.send-btn{
+  width:36px;height:36px;border-radius:50%;border:none;cursor:pointer;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--gray-700);color:var(--gray-500);
+  transition:background .2s,color .2s,box-shadow .2s,transform .1s;
+}
+.send-btn.ready{background:var(--accent);color:#fff;box-shadow:0 0 16px rgba(50,122,194,.5)}
+.send-btn.ready:hover{transform:scale(1.07)}
+.send-btn.stop{background:var(--gray-100);color:var(--gray-900)}
+.send-btn svg.ic{width:17px;height:17px}
+.foot-note{text-align:center;color:var(--gray-600);font-size:11.5px;margin-top:8px}
+
+/* ============ 设置弹窗 ============ */
+.modal-overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(2px);
+  display:flex;align-items:center;justify-content:center;z-index:200;padding:16px;
+  opacity:0;pointer-events:none;transition:opacity .2s;
+}
+.modal-overlay.open{opacity:1;pointer-events:auto}
+.modal{
+  width:100%;max-width:600px;max-height:88dvh;display:flex;flex-direction:column;
+  background:var(--gray-850);border:1px solid var(--gray-750);border-radius:18px;
+  box-shadow:0 24px 80px rgba(0,0,0,.6);
+  transform:translateY(12px) scale(.97);transition:transform .22s cubic-bezier(.34,1.4,.64,1);
+}
+.modal-overlay.open .modal{transform:none}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:18px 22px 12px}
+.modal-head h2{font-size:17px;font-weight:600}
+.modal-body{overflow-y:auto;padding:4px 22px 18px}
+.modal-body section{margin-bottom:22px}
+.modal-body h3{font-size:13px;color:var(--gray-400);font-weight:600;margin-bottom:12px;letter-spacing:.4px}
+.modal-body label{display:block;font-size:12.5px;color:var(--gray-500);margin:10px 0 5px}
+.modal-body input,.modal-body textarea{
+  width:100%;padding:9px 12px;border-radius:10px;border:1px solid var(--gray-750);
+  background:var(--gray-900);color:var(--gray-100);font-size:13.5px;font-family:inherit;outline:none;
+  transition:border-color .15s;
+}
+.modal-body input:focus,.modal-body textarea:focus{border-color:var(--accent)}
+.modal-body textarea{min-height:96px;resize:vertical;line-height:1.6}
+.hint{font-size:11.5px;color:var(--gray-600);margin-top:6px;line-height:1.6}
+.provider-card{background:var(--gray-900);border:1px solid var(--gray-750);border-radius:13px;padding:4px 14px 12px;margin-bottom:10px}
+.provider-card .pc-title{font-size:12.5px;color:var(--gray-400);font-weight:600;padding:10px 0 2px}
+.modal-foot{display:flex;justify-content:flex-end;gap:10px;padding:14px 22px 18px;border-top:1px solid rgba(255,255,255,.05)}
+.btn{padding:9px 20px;border-radius:10px;border:none;font-size:13.5px;cursor:pointer;transition:filter .15s,background .15s,transform .1s}
+.btn:active{transform:scale(.97)}
+.btn-ghost{background:transparent;color:var(--gray-400)}
+.btn-ghost:hover{background:rgba(255,255,255,.06);color:var(--gray-100)}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{filter:brightness(1.15)}
+
+/* toast */
+#toast{
+  position:fixed;bottom:28px;left:50%;transform:translateX(-50%) translateY(16px);
+  background:var(--gray-100);color:var(--gray-950);padding:10px 22px;border-radius:999px;
+  font-size:13px;font-weight:500;z-index:300;opacity:0;pointer-events:none;
+  transition:opacity .25s,transform .25s;box-shadow:0 8px 30px rgba(0,0,0,.4);max-width:86vw;text-align:center;
+}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* 遮罩（移动端侧边栏） */
+#backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:55;opacity:0;pointer-events:none;transition:opacity .25s}
+
+@media (max-width:768px){
+  #sidebar{position:fixed;top:0;left:0;bottom:0;margin-left:0 !important;transform:translateX(-102%);transition:transform .28s cubic-bezier(.4,0,.2,1);box-shadow:8px 0 40px rgba(0,0,0,.5)}
+  #app.sb-open #sidebar{transform:none}
+  #app.sb-open #backdrop{opacity:1;pointer-events:auto}
+  .sugg{grid-template-columns:1fr}
+  #welcome h1{font-size:22px}
+  .thread{padding:10px 12px 24px}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- ======== 侧边栏 ======== -->
+  <aside id="sidebar">
+    <div class="sb-head">
+      <button class="brand" id="btnBrand" title="Easy AI">
+        <div class="orb"><span class="spark"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2l1.9 5.7L19.6 9.6l-5.7 1.9L12 17.2l-1.9-5.7L4.4 9.6l5.7-1.9z"/></svg></span></div>
+        <span class="brand-name">Easy AI</span>
+      </button>
+      <button class="icon-btn" id="btnCollapse" title="收起侧边栏">
+        <svg class="ic" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>
+      </button>
+    </div>
+    <button class="new-chat" id="btnNewChat">
+      <svg class="ic" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>
+      新对话
+    </button>
+    <div class="chat-list" id="chatList"></div>
+    <div class="sb-foot">
+      <button class="sb-foot-btn" id="btnSettings">
+        <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008.6 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 8.6a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        设置
+      </button>
+    </div>
+  </aside>
+  <div id="backdrop"></div>
+
+  <!-- ======== 主区域 ======== -->
+  <main id="main">
+    <header class="topbar">
+      <button class="icon-btn" id="btnMenu" title="侧边栏">
+        <svg class="ic" viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <div class="model-sel" id="modelSel">
+        <button class="model-btn" id="modelBtn">
+          <span id="modelName">自动模式</span>
+          <svg class="ic chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="model-menu" id="modelMenu"></div>
+      </div>
+      <div class="top-status" id="topStatus"><span class="dot"></span><span id="topStatusText">生成中</span></div>
+    </header>
+
+    <div id="chatScroll">
+      <div class="thread">
+        <div id="welcome">
+          <div class="orb lg"><span class="spark"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2l1.9 5.7L19.6 9.6l-5.7 1.9L12 17.2l-1.9-5.7L4.4 9.6l5.7-1.9z"/></svg></span></div>
+          <h1>有什么可以帮你？</h1>
+          <p class="sub">能聊天，还会实时作曲 🎵 和画矢量图 🎨</p>
+          <div class="sugg">
+            <button class="sugg-card" data-q="画一个红色的爱心，再画一个笑脸"><span class="em">🎨</span><span>画一个红色的爱心，再画一个笑脸</span></button>
+            <button class="sugg-card" data-q="用钢琴弹一首小星星"><span class="em">🎹</span><span>用钢琴弹一首小星星</span></button>
+            <button class="sugg-card" data-q="来一段低频震撼的鼓点"><span class="em">🥁</span><span>来一段低频震撼的鼓点</span></button>
+            <button class="sugg-card" data-q="用铜管乐器吹一段胜利的旋律，并画一面旗帜"><span class="em">🎺</span><span>铜管旋律 + 画一面旗帜</span></button>
+          </div>
+        </div>
+        <div id="messages"></div>
+      </div>
+    </div>
+
+    <footer class="input-area">
+      <div class="input-wrap">
+        <div class="input-box">
+          <textarea id="input" rows="1" placeholder="给 Easy AI 发送消息" autocomplete="off"></textarea>
+          <button class="send-btn" id="btnSend" title="发送">
+            <svg class="ic" viewBox="0 0 24 24" id="sendIcon"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+          </button>
+        </div>
+        <p class="foot-note">内容由 AI 生成，请注意甄别 · 音频为浏览器端物理建模实时合成</p>
+      </div>
+    </footer>
+  </main>
+</div>
+
+<!-- ======== 设置弹窗 ======== -->
+<div class="modal-overlay" id="setOverlay">
+  <div class="modal">
+    <div class="modal-head">
+      <h2>设置</h2>
+      <button class="icon-btn" id="setClose"><svg class="ic" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="modal-body">
+      <section>
+        <h3>通用</h3>
+        <label>AI 名称</label>
+        <input id="cfgName" placeholder="Easy AI">
+        <label>系统提示词</label>
+        <textarea id="cfgPrompt" placeholder="你是一个乐于助人、富有创造力的 AI 助手。"></textarea>
+        <p class="hint">画图 / 作曲的输出规则由服务端自动追加，无需填写。</p>
+      </section>
+      <section>
+        <h3>连接 · API 线路</h3>
+        <div id="providerList"></div>
+        <p class="hint">密钥只保存在服务器端，前端不会看到明文。密钥留空 = 保持原值不变。多条线路按顺序自动故障转移。</p>
+      </section>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" id="setCancel">取消</button>
+      <button class="btn btn-primary" id="setSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+/* ==================================================================
+ * 工具
+ * ================================================================== */
+const API = 'api.php';
+const $ = s => document.querySelector(s);
+function esc(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
+function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2200)}
+if (window.marked && marked.setOptions) marked.setOptions({breaks:true,gfm:true});
+
+const ICONS = {
+  trash:'<svg class="ic" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14"/></svg>',
+  copy:'<svg class="ic" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>',
+  regen:'<svg class="ic" viewBox="0 0 24 24"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>',
+  stop:'<svg class="ic" viewBox="0 0 24 24" style="fill:currentColor;stroke:none"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
+  send:'<svg class="ic" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
+  spark:'<svg class="ic" viewBox="0 0 24 24"><path d="M12 2l1.9 5.7L19.6 9.6l-5.7 1.9L12 17.2l-1.9-5.7L4.4 9.6l5.7-1.9z"/></svg>',
+  chev:'<svg class="ic" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>'
+};
+
+/* ==================================================================
+ * 物理建模音频引擎（源自 easy_ai，完整保留）
+ * ================================================================== */
+document.addEventListener('click',()=>{if(window._globalCtx&&window._globalCtx.state==='suspended')window._globalCtx.resume()},{passive:true});
+
+var _reverbCache=null;
+function getReverb(ctx){
+  if(_reverbCache&&_reverbCache.sampleRate===ctx.sampleRate){var c=ctx.createConvolver();c.buffer=_reverbCache;return c}
+  var dur=2.5,len=Math.floor(ctx.sampleRate*dur);
+  var imp=ctx.createBuffer(2,len,ctx.sampleRate);
+  for(var ch=0;ch<2;ch++){
+    var d=imp.getChannelData(ch);
+    for(var i=0;i<len;i++){
+      var t=i/ctx.sampleRate;var val=0;
+      var reflections=[0.03,0.06,0.09,0.13,0.17,0.22];
+      var amps=[0.5,0.35,0.25,0.18,0.12,0.08];
+      for(var j=0;j<reflections.length;j++){
+        if(Math.abs(t-reflections[j])<0.004)val=amps[j]*(Math.random()*0.5+0.5);
+      }
+      var decay=Math.exp(-t*2.8);var hfDamp=Math.exp(-t*5);
+      val+=(Math.random()*2-1)*decay*(0.12+hfDamp*0.08);
+      d[i]=val*0.5;
+    }
+  }
+  _reverbCache=imp;var c2=ctx.createConvolver();c2.buffer=imp;return c2;
+}
+function getOvertoneProfile(midiNote){
+  var n=midiNote||60;var bassFactor=Math.max(0,1-(n-20)/60);
+  return{h1:1.0,h2:0.55+bassFactor*0.3,h3:0.25+bassFactor*0.3,h4:0.12+bassFactor*0.2,h5:0.06+bassFactor*0.15,h6:0.03+bassFactor*0.1,bassBoost:bassFactor*0.3};
+}
+function getVelocityDynamics(vel){
+  var v=Math.max(0.05,Math.min(1.5,vel));
+  return{attackStrength:0.3+v*0.7,bodyResonance:0.3+v*0.7,brightness:0.4+v*0.6,decayTime:0.4+(1.5-v)*0.6,harmonicRichness:0.25+v*0.75};
+}
+var INS={
+  'piano':{engine:'hammer',wave:'triangle',filter:2500},
+  'bright_piano':{engine:'hammer',wave:'triangle',filter:4000},
+  'honky_tonk':{engine:'hammer',wave:'triangle',filter:1500},
+  'electric_piano':{engine:'hammer',wave:'triangle',filter:3000},
+  'harpsichord':{engine:'pluck',wave:'triangle',decay:1.2,filter:3000},
+  'violin':{engine:'bowed',wave:'sawtooth',vibrato:5,depth:4,bowNoise:0.08,attack:0.2,filter:2800},
+  'viola':{engine:'bowed',wave:'sawtooth',vibrato:4,depth:5,bowNoise:0.1,attack:0.25,filter:2200},
+  'cello':{engine:'bowed',wave:'sawtooth',vibrato:3.5,depth:6,bowNoise:0.12,attack:0.3,filter:1600},
+  'contrabass':{engine:'bowed',wave:'sawtooth',vibrato:2.5,depth:8,bowNoise:0.15,attack:0.35,filter:800},
+  'strings':{engine:'bowed',wave:'sawtooth',vibrato:3,depth:3,bowNoise:0.05,attack:0.3,filter:3000},
+  'pizzicato':{engine:'pluck',wave:'triangle',decay:0.6,filter:2500},
+  'harp':{engine:'pluck',wave:'triangle',decay:2,filter:3500},
+  'trumpet':{engine:'brass',wave:'sawtooth',brightness:0.9,attack:0.03,filter:3500},
+  'trombone':{engine:'brass',wave:'sawtooth',brightness:0.7,attack:0.05,filter:2500},
+  'tuba':{engine:'brass',wave:'sawtooth',brightness:0.5,attack:0.08,filter:1200},
+  'french_horn':{engine:'brass',wave:'sawtooth',brightness:0.6,attack:0.04,filter:2000},
+  'brass':{engine:'brass',wave:'sawtooth',brightness:0.8,attack:0.03,filter:3000},
+  'flute':{engine:'wind',wave:'sine',breathNoise:0.03,attack:0.06,filter:5000},
+  'piccolo':{engine:'wind',wave:'sine',breathNoise:0.04,attack:0.04,filter:8000},
+  'clarinet':{engine:'wind',wave:'square',breathNoise:0.06,attack:0.05,filter:3000},
+  'oboe':{engine:'wind',wave:'sawtooth',breathNoise:0.08,attack:0.04,filter:3500},
+  'bassoon':{engine:'wind',wave:'sawtooth',breathNoise:0.07,attack:0.06,filter:1800},
+  'sax':{engine:'reed',wave:'sawtooth',breathNoise:0.08,reediness:0.6,attack:0.04,filter:2500},
+  'alto_sax':{engine:'reed',wave:'sawtooth',breathNoise:0.07,reediness:0.55,attack:0.04,filter:2800},
+  'tenor_sax':{engine:'reed',wave:'sawtooth',breathNoise:0.09,reediness:0.65,attack:0.05,filter:2200},
+  'guitar':{engine:'pluck',wave:'triangle',decay:1.5,filter:2000},
+  'nylon_guitar':{engine:'pluck',wave:'triangle',decay:2,filter:2500},
+  'electric_guitar':{engine:'pluck',wave:'sawtooth',decay:1.2,filter:2500},
+  'overdrive_guitar':{engine:'pluck',wave:'square',decay:1,filter:2000},
+  'distortion_guitar':{engine:'pluck',wave:'square',decay:0.8,filter:1500},
+  'bass':{engine:'pluck',wave:'sawtooth',decay:0.6,filter:350},
+  'acoustic_bass':{engine:'pluck',wave:'triangle',decay:0.8,filter:400},
+  'slap_bass':{engine:'pluck',wave:'sawtooth',decay:0.3,filter:600},
+  'synth_bass':{engine:'pluck',wave:'square',decay:0.4,filter:250},
+  'organ':{engine:'additive',harmonics:[1,0.5,0.3,0.15,0.08,0.04,0.02],attack:0.02,release:0.1},
+  'church_organ':{engine:'additive',harmonics:[1,0.7,0.5,0.3,0.2,0.1,0.05,0.03],attack:0.05,release:0.3},
+  'accordion':{engine:'additive',harmonics:[1,0.6,0.3,0.2,0.1],attack:0.03,release:0.15},
+  'bell':{engine:'bell',wave:'sine',decay:2.5,modFreq:1.07},
+  'music_box':{engine:'bell',wave:'sine',decay:1.8,modFreq:1.03},
+  'xylophone':{engine:'bell',wave:'triangle',decay:1.2,modFreq:1.01},
+  'glockenspiel':{engine:'bell',wave:'sine',decay:2,modFreq:1.05},
+  'vibraphone':{engine:'bell',wave:'triangle',decay:3,modFreq:1.02},
+  'celesta':{engine:'bell',wave:'sine',decay:1.5,modFreq:1.04},
+  'marimba':{engine:'bell',wave:'triangle',decay:1.4,modFreq:1.01},
+  'drum':{engine:'perc',percType:'kick'},
+  'kick':{engine:'perc',percType:'kick'},
+  'snare':{engine:'perc',percType:'snare'},
+  'hihat':{engine:'perc',percType:'hihat'},
+  'clap':{engine:'perc',percType:'clap'},
+  'ride':{engine:'perc',percType:'ride'},
+  'crash':{engine:'perc',percType:'crash'},
+  'tom':{engine:'perc',percType:'tom'},
+  'cowbell':{engine:'perc',percType:'cowbell'},
+  'tambourine':{engine:'perc',percType:'tambourine'},
+  'shaker':{engine:'perc',percType:'shaker'},
+  'woodblock':{engine:'perc',percType:'woodblock'},
+  'timpani':{engine:'perc',percType:'timpani'},
+  'synth_lead':{engine:'hammer',wave:'sawtooth',filter:5000},
+  'pad':{engine:'bowed',wave:'sine',vibrato:2,depth:1,bowNoise:0.02,attack:0.5,filter:3000},
+  'default':{engine:'hammer',wave:'triangle',filter:2500}
+};
+function n2m(n){if(!n||n==='R')return -1;var m=n.match(/^([A-GR])([#b]?)(\d)$/i);if(!m||m[1].toUpperCase()==='R')return -1;var nm={C:0,D:2,E:4,F:5,G:7,A:9,B:11};var b=nm[m[1].toUpperCase()]||0;if(m[2]==='#')b+=1;if(m[2]==='b')b-=1;return(parseInt(m[3])+1)*12+b}
+function m2f(m){return 440*Math.pow(2,(m-69)/12)}
+var CHORDS_MIDI={C:[60,64,67],Cm:[60,63,67],D:[62,66,69],Dm:[62,65,69],E:[64,68,71],Em:[64,67,71],F:[65,69,72],Fm:[65,68,72],G:[67,71,74],Gm:[67,70,74],A:[69,73,76],Am:[69,72,76]};
+function parseMIDI(code){
+  var lines=code.trim().split('\n'),tracks=[],ct=null,ci='piano',bpm=120;
+  for(var i=0;i<lines.length;i++){
+    var line=lines[i].trim();if(!line||line.startsWith('//'))continue;
+    var tm=line.match(/^!track\s+(\w+)/i);if(tm&&INS[tm[1]]){if(ct)tracks.push(ct);ci=tm[1];ct={inst:ci,notes:[],tt:0};continue}
+    var bm=line.match(/^!bpm\s+(\d+)/i);if(bm){bpm=parseInt(bm[1]);continue}
+    var cm=line.match(/^!chord\s+(\w+)\s+([\d.]+)?/i);if(cm&&CHORDS_MIDI[cm[1]]){if(!ct)ct={inst:ci,notes:[],tt:0};var cdur=parseFloat(cm[2])||1;CHORDS_MIDI[cm[1]].forEach(function(m){ct.notes.push({midi:m,time:ct.tt,duration:cdur})});ct.tt+=cdur;continue}
+    if(!ct)ct={inst:ci,notes:[],tt:0};
+    var parts=line.split(/\s+/);if(parts.length>=2){var dur=parseFloat(parts[1])||0.5;var vel=1;if(parts.length>=3){if(parts[2]==='loud')vel=1.4;else if(parts[2]==='soft')vel=0.4}else{vel=0.7+Math.random()*0.6}parts[0].split('+').forEach(function(n){var m=n2m(n.trim());if(m>=0)ct.notes.push({midi:m,time:ct.tt,duration:dur,velocity:vel})});ct.tt+=dur}
+  }if(ct)tracks.push(ct);
+  tracks.forEach(function(t){t.notes.forEach(function(n){n.freq=n.midi>=0?m2f(n.midi):0})});
+  return{tracks:tracks,bpm:bpm};
+}
+function playNote(ctx,freq,start,dur,cfg,midiNote,velocity){
+  try{
+    var mg=ctx.createGain();mg.gain.value=0.18;
+    var dryG=ctx.createGain();dryG.gain.value=0.7;dryG.connect(ctx.destination);
+    var wetG=ctx.createGain();wetG.gain.value=0.3;
+    try{var rev=getReverb(ctx);mg.connect(dryG);mg.connect(rev);rev.connect(wetG);wetG.connect(ctx.destination)}catch(e){mg.connect(dryG)}
+    var vel=velocity||1;var dyn=getVelocityDynamics(vel);var ov=getOvertoneProfile(midiNote||60);var eng=(cfg||INS['default']).engine||'hammer';
+    if(eng==='hammer'){
+      var hammer=ctx.createOscillator();hammer.type='square';hammer.frequency.value=freq*2.5;
+      var hG=ctx.createGain();hG.gain.setValueAtTime(0,start);hG.gain.linearRampToValueAtTime(dyn.attackStrength*0.5,start+0.003);hG.gain.exponentialRampToValueAtTime(0.001,start+0.05);
+      hammer.connect(hG);hG.connect(mg);hammer.start(start);hammer.stop(start+0.05);
+      var harmonics=[1,0.55,0.25,0.12,0.06,0.03];var hRichness=dyn.harmonicRichness;
+      for(var h=1;h<=6;h++){
+        var hv=harmonics[h-1]*hRichness*ov['h'+(h+1)]*0.6;if(hv<0.01)continue;
+        var ho=ctx.createOscillator();ho.type='sine';ho.frequency.value=freq*(h+1);
+        var hg=ctx.createGain();hg.gain.setValueAtTime(0,start);hg.gain.linearRampToValueAtTime(hv*dyn.bodyResonance,start+0.005);hg.gain.exponentialRampToValueAtTime(0.001,start+dur*dyn.decayTime*(1-h*0.15));
+        ho.connect(hg);hg.connect(mg);ho.start(start);ho.stop(start+dur*dyn.decayTime+0.1);
+      }
+      var body=ctx.createOscillator();body.type=cfg.wave||'triangle';body.frequency.value=freq;
+      var bF=ctx.createBiquadFilter();bF.type='lowpass';bF.frequency.value=(cfg.filter||2500)*dyn.brightness;
+      var bG=ctx.createGain();bG.gain.setValueAtTime(0,start);bG.gain.linearRampToValueAtTime(dyn.bodyResonance*0.7,start+0.005);bG.gain.exponentialRampToValueAtTime(0.001,start+dur*dyn.decayTime);
+      body.connect(bF);bF.connect(bG);bG.connect(mg);body.start(start);body.stop(start+dur*dyn.decayTime+0.1);
+      if(ov.bassBoost>0.05){var reso=ctx.createOscillator();reso.type='sine';reso.frequency.value=freq*0.5;var rG=ctx.createGain();rG.gain.setValueAtTime(0,start);rG.gain.linearRampToValueAtTime(ov.bassBoost*0.15,start+0.1);rG.gain.exponentialRampToValueAtTime(0.001,start+dur*1.5);reso.connect(rG);rG.connect(mg);reso.start(start);reso.stop(start+dur*1.5+0.5)}
+    }else if(eng==='bowed'){
+      var osc=ctx.createOscillator();osc.type=cfg.wave||'sawtooth';osc.frequency.value=freq;
+      var vib=ctx.createOscillator();vib.frequency.value=(cfg.vibrato||5)+vel*2;
+      var vibG=ctx.createGain();vibG.gain.value=(cfg.depth||4)*vel;vib.connect(vibG);vibG.connect(osc.frequency);vib.start(start);vib.stop(start+dur);
+      if(cfg.bowNoise>0){var bowN=ctx.createOscillator();bowN.type='sawtooth';bowN.frequency.value=freq*0.5;var bowG=ctx.createGain();bowG.gain.setValueAtTime(cfg.bowNoise*vel,start);bowG.gain.exponentialRampToValueAtTime(0.001,start+dur);bowN.connect(bowG);bowG.connect(mg);bowN.start(start);bowN.stop(start+dur)}
+      var flt=ctx.createBiquadFilter();flt.type='lowpass';flt.frequency.value=(cfg.filter||2800)*dyn.brightness;
+      var g=ctx.createGain();g.gain.setValueAtTime(0,start);g.gain.linearRampToValueAtTime(0.8*vel,start+(cfg.attack||0.2));g.gain.setValueAtTime(0.7*vel,start+dur*0.8);g.gain.exponentialRampToValueAtTime(0.001,start+dur+0.1);
+      osc.connect(flt);flt.connect(g);g.connect(mg);osc.start(start);osc.stop(start+dur+0.2);
+    }else if(eng==='brass'){
+      var osc2=ctx.createOscillator();osc2.type=cfg.wave||'sawtooth';osc2.frequency.value=freq;
+      var flt2=ctx.createBiquadFilter();flt2.type='lowpass';flt2.frequency.setValueAtTime(300,start);flt2.frequency.linearRampToValueAtTime((cfg.filter||3000)*dyn.brightness,start+(cfg.attack||0.03));
+      var g2=ctx.createGain();g2.gain.setValueAtTime(0,start);g2.gain.linearRampToValueAtTime((cfg.brightness||0.8)*vel,start+(cfg.attack||0.03));g2.gain.setValueAtTime((cfg.brightness||0.8)*vel*0.8,start+dur*0.7);g2.gain.exponentialRampToValueAtTime(0.001,start+dur);
+      osc2.connect(flt2);flt2.connect(g2);g2.connect(mg);osc2.start(start);osc2.stop(start+dur+0.1);
+    }else if(eng==='wind'){
+      var osc3=ctx.createOscillator();osc3.type=cfg.wave||'sine';osc3.frequency.value=freq;
+      if(cfg.breathNoise>0){var bBuf=ctx.createBuffer(1,Math.floor(ctx.sampleRate*dur),ctx.sampleRate);var d=bBuf.getChannelData(0);for(var i=0;i<d.length;i++)d[i]=Math.random()*2-1;var br=ctx.createBufferSource();br.buffer=bBuf;var bF2=ctx.createBiquadFilter();bF2.type='highpass';bF2.frequency.value=3000;var bG2=ctx.createGain();bG2.gain.setValueAtTime(cfg.breathNoise*vel,start);bG2.gain.exponentialRampToValueAtTime(0.001,start+dur);br.connect(bF2);bF2.connect(bG2);bG2.connect(mg);br.start(start);br.stop(start+dur)}
+      var flt3=ctx.createBiquadFilter();flt3.type='lowpass';flt3.frequency.value=(cfg.filter||4000)*dyn.brightness;
+      var g3=ctx.createGain();g3.gain.setValueAtTime(0,start);g3.gain.linearRampToValueAtTime(0.5*vel,start+(cfg.attack||0.06));g3.gain.setValueAtTime(0.4*vel,start+dur*0.7);g3.gain.exponentialRampToValueAtTime(0.001,start+dur);osc3.connect(flt3);flt3.connect(g3);g3.connect(mg);osc3.start(start);osc3.stop(start+dur+0.1);
+    }else if(eng==='reed'){
+      var osc4=ctx.createOscillator();osc4.type=cfg.wave||'sawtooth';osc4.frequency.value=freq;
+      if(cfg.breathNoise>0){var bBuf2=ctx.createBuffer(1,Math.floor(ctx.sampleRate*dur),ctx.sampleRate);var d2=bBuf2.getChannelData(0);for(var i2=0;i2<d2.length;i2++)d2[i2]=Math.random()*2-1;var br2=ctx.createBufferSource();br2.buffer=bBuf2;var bF3=ctx.createBiquadFilter();bF3.type='bandpass';bF3.frequency.value=cfg.filter||2500;bF3.Q.value=2;var bG3=ctx.createGain();bG3.gain.setValueAtTime(cfg.breathNoise*vel,start);bG3.gain.exponentialRampToValueAtTime(0.001,start+dur);br2.connect(bF3);bF3.connect(bG3);bG3.connect(mg);br2.start(start);br2.stop(start+dur)}
+      var flt4=ctx.createBiquadFilter();flt4.type='bandpass';flt4.frequency.value=cfg.filter||2500;flt4.Q.value=cfg.reediness||0.6;
+      var g4=ctx.createGain();g4.gain.setValueAtTime(0,start);g4.gain.linearRampToValueAtTime(0.6*vel,start+(cfg.attack||0.04));g4.gain.setValueAtTime(0.5*vel,start+dur*0.7);g4.gain.exponentialRampToValueAtTime(0.001,start+dur);osc4.connect(flt4);flt4.connect(g4);g4.connect(mg);osc4.start(start);osc4.stop(start+dur+0.1);
+    }else if(eng==='pluck'){
+      var pBuf=ctx.createBuffer(1,Math.floor(ctx.sampleRate*0.06),ctx.sampleRate);var pd=pBuf.getChannelData(0);for(var ip=0;ip<pd.length;ip++)pd[ip]=Math.random()*2-1;var pl=ctx.createBufferSource();pl.buffer=pBuf;
+      var pF=ctx.createBiquadFilter();pF.type='highpass';pF.frequency.value=800;var pG=ctx.createGain();pG.gain.setValueAtTime(0,start);pG.gain.linearRampToValueAtTime(dyn.attackStrength*0.5,start+0.003);pG.gain.exponentialRampToValueAtTime(0.001,start+0.06);pl.connect(pF);pF.connect(pG);pG.connect(mg);pl.start(start);
+      var body2=ctx.createOscillator();body2.type=cfg.wave||'triangle';body2.frequency.value=freq;
+      var bF4=ctx.createBiquadFilter();bF4.type='lowpass';bF4.frequency.value=(cfg.filter||2000)*dyn.brightness;
+      var bG4=ctx.createGain();bG4.gain.setValueAtTime(0,start);bG4.gain.linearRampToValueAtTime(dyn.bodyResonance*0.5,start+0.005);bG4.gain.exponentialRampToValueAtTime(0.001,start+dur*(cfg.decay||1.5)*dyn.decayTime);
+      body2.connect(bF4);bF4.connect(bG4);bG4.connect(mg);body2.start(start);body2.stop(start+dur*(cfg.decay||1.5)+0.1);
+    }else if(eng==='additive'){
+      var harms=cfg.harmonics||[1,0.5,0.3,0.15,0.08];
+      harms.forEach(function(vol,ia){if(vol<=0)return;var ho2=ctx.createOscillator();ho2.type='sine';ho2.frequency.value=freq*(ia+1);var hg2=ctx.createGain();hg2.gain.setValueAtTime(0,start+(cfg.attack||0.02));hg2.gain.linearRampToValueAtTime(vol*0.5*vel,start+(cfg.attack||0.02)+0.01);hg2.gain.setValueAtTime(vol*0.3*vel,start+dur);hg2.gain.exponentialRampToValueAtTime(0.001,start+dur+(cfg.release||0.1));ho2.connect(hg2);hg2.connect(mg);ho2.start(start);ho2.stop(start+dur+(cfg.release||0.1))});
+    }else if(eng==='bell'){
+      var osc5=ctx.createOscillator();osc5.type=cfg.wave||'sine';osc5.frequency.value=freq;
+      var mod=ctx.createOscillator();mod.type='sine';mod.frequency.value=freq*(cfg.modFreq||1.03);
+      var modG=ctx.createGain();modG.gain.value=freq*0.005;mod.connect(modG);modG.connect(osc5.frequency);mod.start(start);mod.stop(start+dur*(cfg.decay||2));
+      var g5=ctx.createGain();g5.gain.setValueAtTime(0,start);g5.gain.linearRampToValueAtTime(0.4*vel,start+0.005);g5.gain.exponentialRampToValueAtTime(0.001,start+dur*(cfg.decay||2));osc5.connect(g5);g5.connect(mg);osc5.start(start);osc5.stop(start+dur*(cfg.decay||2)+0.1);
+    }else if(eng==='perc'){
+      var pt=(cfg||{}).percType||'kick';
+      if(pt==='kick'){
+        var o=ctx.createOscillator();o.type='sine';o.frequency.setValueAtTime(80,start);o.frequency.exponentialRampToValueAtTime(18,start+0.25);
+        var g6=ctx.createGain();g6.gain.setValueAtTime(1.3*vel,start);g6.gain.exponentialRampToValueAtTime(0.001,start+0.45);o.connect(g6);g6.connect(mg);o.start(start);o.stop(start+0.5);
+      }else if(pt==='snare'){
+        var nBuf=ctx.createBuffer(1,Math.floor(ctx.sampleRate*0.15),ctx.sampleRate);var nd=nBuf.getChannelData(0);for(var i3=0;i3<nd.length;i3++)nd[i3]=Math.random()*2-1;var nSrc=ctx.createBufferSource();nSrc.buffer=nBuf;var nF=ctx.createBiquadFilter();nF.type='highpass';nF.frequency.value=1200;var nG=ctx.createGain();nG.gain.setValueAtTime(0.6*vel,start);nG.gain.exponentialRampToValueAtTime(0.001,start+0.14);nSrc.connect(nF);nF.connect(nG);nG.connect(mg);nSrc.start(start);nSrc.stop(start+0.15);
+        var tO=ctx.createOscillator();tO.type='triangle';tO.frequency.value=180;var tG=ctx.createGain();tG.gain.setValueAtTime(0.35*vel,start);tG.gain.exponentialRampToValueAtTime(0.001,start+0.1);tO.connect(tG);tG.connect(mg);tO.start(start);tO.stop(start+0.1);
+      }else if(pt==='hihat'){
+        var nBuf2=ctx.createBuffer(1,Math.floor(ctx.sampleRate*0.08),ctx.sampleRate);var nd2=nBuf2.getChannelData(0);for(var i4=0;i4<nd2.length;i4++)nd2[i4]=Math.random()*2-1;var nSrc2=ctx.createBufferSource();nSrc2.buffer=nBuf2;
+        var nF2=ctx.createBiquadFilter();nF2.type='highpass';nF2.frequency.value=9000;var nF2b=ctx.createBiquadFilter();nF2b.type='highpass';nF2b.frequency.value=12000;
+        var nG2=ctx.createGain();nG2.gain.setValueAtTime(0.35*vel,start);nG2.gain.exponentialRampToValueAtTime(0.001,start+0.06);nSrc2.connect(nF2);nF2.connect(nF2b);nF2b.connect(nG2);nG2.connect(mg);nSrc2.start(start);nSrc2.stop(start+0.06);
+      }else if(pt==='crash'){
+        var nBuf3=ctx.createBuffer(1,Math.floor(ctx.sampleRate*0.6),ctx.sampleRate);var nd3=nBuf3.getChannelData(0);for(var i5=0;i5<nd3.length;i5++)nd3[i5]=Math.random()*2-1;var nSrc3=ctx.createBufferSource();nSrc3.buffer=nBuf3;
+        var nF3=ctx.createBiquadFilter();nF3.type='bandpass';nF3.frequency.value=7000;nF3.Q.value=0.4;var nF3b=ctx.createBiquadFilter();nF3b.type='highpass';nF3b.frequency.value=4000;
+        var nG3=ctx.createGain();nG3.gain.setValueAtTime(0.5*vel,start);nG3.gain.exponentialRampToValueAtTime(0.001,start+0.5);nSrc3.connect(nF3);nF3.connect(nF3b);nF3b.connect(nG3);nG3.connect(mg);nSrc3.start(start);nSrc3.stop(start+0.5);
+      }else if(pt==='tom'){
+        var o2=ctx.createOscillator();o2.type='sine';o2.frequency.setValueAtTime(130,start);o2.frequency.exponentialRampToValueAtTime(45,start+0.18);
+        var g7=ctx.createGain();g7.gain.setValueAtTime(0.7*vel,start);g7.gain.setValueAtTime(0.3*vel,start+0.12);g7.gain.exponentialRampToValueAtTime(0.001,start+0.4);o2.connect(g7);g7.connect(mg);o2.start(start);o2.stop(start+0.4);
+      }else if(pt==='ride'){
+        var nBuf4=ctx.createBuffer(1,Math.floor(ctx.sampleRate*0.35),ctx.sampleRate);var nd4=nBuf4.getChannelData(0);for(var i6=0;i6<nd4.length;i6++)nd4[i6]=Math.random()*2-1;var nSrc4=ctx.createBufferSource();nSrc4.buffer=nBuf4;
+        var nF4=ctx.createBiquadFilter();nF4.type='bandpass';nF4.frequency.value=5500;nF4.Q.value=0.8;
+        var nG4=ctx.createGain();nG4.gain.setValueAtTime(0.28*vel,start);nG4.gain.exponentialRampToValueAtTime(0.001,start+0.3);nSrc4.connect(nF4);nF4.connect(nG4);nG4.connect(mg);nSrc4.start(start);nSrc4.stop(start+0.3);
+      }else if(pt==='clap'){
+        for(var j=0;j<4;j++){var nBufC=ctx.createBuffer(1,Math.floor(ctx.sampleRate*0.03),ctx.sampleRate);var ndC=nBufC.getChannelData(0);for(var iC=0;iC<ndC.length;iC++)ndC[iC]=Math.random()*2-1;var nSrcC=ctx.createBufferSource();nSrcC.buffer=nBufC;var nFC=ctx.createBiquadFilter();nFC.type='bandpass';nFC.frequency.value=2500;var nGC=ctx.createGain();nGC.gain.setValueAtTime(0.35*vel,start+j*0.02);nGC.gain.exponentialRampToValueAtTime(0.001,start+j*0.02+0.025);nSrcC.connect(nFC);nFC.connect(nGC);nGC.connect(mg);nSrcC.start(start+j*0.02);nSrcC.stop(start+j*0.02+0.03)}
+      }else if(pt==='tambourine'){
+        for(var j2=0;j2<5;j2++){var nBufT=ctx.createBuffer(1,Math.floor(ctx.sampleRate*0.03),ctx.sampleRate);var ndT=nBufT.getChannelData(0);for(var iT=0;iT<ndT.length;iT++)ndT[iT]=Math.random()*2-1;var nSrcT=ctx.createBufferSource();nSrcT.buffer=nBufT;var nFT=ctx.createBiquadFilter();nFT.type='highpass';nFT.frequency.value=11000;var nGT=ctx.createGain();nGT.gain.setValueAtTime(0.15*vel,start+j2*0.04);nGT.gain.exponentialRampToValueAtTime(0.001,start+j2*0.04+0.025);nSrcT.connect(nFT);nFT.connect(nGT);nGT.connect(mg);nSrcT.start(start+j2*0.04);nSrcT.stop(start+j2*0.04+0.03)}
+      }else if(pt==='shaker'){
+        var nBufS=ctx.createBuffer(1,Math.floor(ctx.sampleRate*dur),ctx.sampleRate);var ndS=nBufS.getChannelData(0);for(var iS=0;iS<ndS.length;iS++)ndS[iS]=Math.random()*2-1;var nSrcS=ctx.createBufferSource();nSrcS.buffer=nBufS;
+        var nFS=ctx.createBiquadFilter();nFS.type='bandpass';nFS.frequency.value=4500;nFS.Q.value=0.25;
+        var nGS=ctx.createGain();nGS.gain.setValueAtTime(0.18*vel,start);nGS.gain.setValueAtTime(0.14*vel,start+dur*0.5);nGS.gain.exponentialRampToValueAtTime(0.001,start+dur);nSrcS.connect(nFS);nFS.connect(nGS);nGS.connect(mg);nSrcS.start(start);nSrcS.stop(start+dur);
+      }else if(pt==='cowbell'){
+        var o3=ctx.createOscillator();o3.type='square';o3.frequency.value=850;var o4=ctx.createOscillator();o4.type='square';o4.frequency.value=860;
+        var g8=ctx.createGain();g8.gain.setValueAtTime(0.28*vel,start);g8.gain.exponentialRampToValueAtTime(0.001,start+0.18);o3.connect(g8);o4.connect(g8);o3.start(start);o3.stop(start+0.18);o4.start(start);o4.stop(start+0.18);
+      }else if(pt==='woodblock'){
+        var o5=ctx.createOscillator();o5.type='square';o5.frequency.value=1300;var g9=ctx.createGain();g9.gain.setValueAtTime(0.35*vel,start);g9.gain.exponentialRampToValueAtTime(0.001,start+0.1);o5.connect(g9);g9.connect(mg);o5.start(start);o5.stop(start+0.1);
+      }else if(pt==='timpani'){
+        var o6=ctx.createOscillator();o6.type='sine';o6.frequency.setValueAtTime(55,start);o6.frequency.exponentialRampToValueAtTime(35,start+dur*0.5);
+        var gA=ctx.createGain();gA.gain.setValueAtTime(0.65*vel,start);gA.gain.setValueAtTime(0.4*vel,start+dur*0.3);gA.gain.exponentialRampToValueAtTime(0.001,start+dur+1);o6.connect(gA);gA.connect(mg);o6.start(start);o6.stop(start+dur+1.2);
+        var o7=ctx.createOscillator();o7.type='sine';o7.frequency.value=28;var gB=ctx.createGain();gB.gain.setValueAtTime(0.25*vel,start);gB.gain.exponentialRampToValueAtTime(0.001,start+dur+1.8);o7.connect(gB);gB.connect(mg);o7.start(start);o7.stop(start+dur+1.8);
+      }
+    }else{
+      var oscF=ctx.createOscillator();oscF.type='triangle';oscF.frequency.value=freq;
+      var gF=ctx.createGain();gF.gain.setValueAtTime(0,start);gF.gain.linearRampToValueAtTime(0.5*vel,start+0.01);gF.gain.exponentialRampToValueAtTime(0.001,start+dur);oscF.connect(gF);gF.connect(mg);oscF.start(start);oscF.stop(start+dur+0.1);
+    }
+  }catch(e){console.error('播放音符失败:',e)}
+}
+function playMIDIBlock(tracks,bpm,ctx,st){
+  var bd=60/(bpm||120);
+  tracks.forEach(function(track){
+    track.notes.forEach(function(n){
+      if(n.freq<=0)return;
+      var cfgI=INS[track.inst]||INS['default'];
+      playNote(ctx,n.freq,st+n.time*bd,n.duration*bd,cfgI,n.midi,n.velocity||1);
+    });
+  });
+}
+
+/* ==================================================================
+ * SVG 绘图引擎（源自 easy_ai，完整保留）
+ * ================================================================== */
+var COLORS={red:'#e74c3c',blue:'#3498db',green:'#2ecc71',yellow:'#f1c40f',purple:'#9b59b6',orange:'#e67e22',pink:'#fd79a8',white:'#fff',black:'#333',gray:'#95a5a6'};
+function G(c){return COLORS[c]||c||'#333'}
+function drawShape(line){var p=line.split(/\s+/),cmd=p[0];
+  if(cmd==='!heart'){var cx=+p[1]||200,cy=+p[2]||150,s=+p[3]||40,c=G(p[4]);return'<path d="M'+cx+','+(cy-s*.3)+' C'+(cx-s*1.2)+','+(cy-s*1.2)+' '+(cx-s*.8)+','+(cy+s*.5)+' '+cx+','+(cy+s*.8)+' C'+(cx+s*.8)+','+(cy+s*.5)+' '+(cx+s*1.2)+','+(cy-s*1.2)+' '+cx+','+(cy-s*.3)+'" fill="'+c+'"/>'}
+  if(cmd==='!star'){var cx2=+p[1]||200,cy2=+p[2]||150,s2=+p[3]||40,c2=G(p[4]);var pts='';for(var i=0;i<5;i++){var a=Math.PI/2+i*Math.PI*2/5;pts+=(i?' ':'')+(cx2+Math.cos(a)*s2)+','+(cy2-Math.sin(a)*s2);a+=Math.PI/5;pts+=' '+(cx2+Math.cos(a)*s2*.4)+','+(cy2-Math.sin(a)*s2*.4)}return'<polygon points="'+pts+'" fill="'+c2+'"/>'}
+  if(cmd==='!smile'){var cx3=+p[1]||200,cy3=+p[2]||150,s3=+p[3]||40;return'<circle cx="'+cx3+'" cy="'+cy3+'" r="'+s3+'" fill="#f1c40f"/><circle cx="'+(cx3-s3*.3)+'" cy="'+(cy3-s3*.2)+'" r="'+s3*.1+'" fill="#333"/><circle cx="'+(cx3+s3*.3)+'" cy="'+(cy3-s3*.2)+'" r="'+s3*.1+'" fill="#333"/><path d="M'+(cx3-s3*.5)+','+(cy3+s3*.1)+' Q'+cx3+','+(cy3+s3*.5)+' '+(cx3+s3*.5)+','+(cy3+s3*.1)+'" fill="none" stroke="#333" stroke-width="'+s3*.08+'"/>'}
+  if(cmd==='!sun'){var cx4=+p[1]||200,cy4=+p[2]||150,s4=+p[3]||40;var r='';for(var i2=0;i2<12;i2++){var a2=i2*Math.PI/6;r+='<line x1="'+(cx4+Math.cos(a2)*s4*.65)+'" y1="'+(cy4-Math.sin(a2)*s4*.65)+'" x2="'+(cx4+Math.cos(a2)*s4)+'" y2="'+(cy4-Math.sin(a2)*s4)+'" stroke="#f1c40f" stroke-width="'+s4*.08+'"/>'}return'<circle cx="'+cx4+'" cy="'+cy4+'" r="'+s4*.5+'" fill="#f39c12"/>'+r}
+  if(cmd==='!cloud'){var cx5=+p[1]||200,cy5=+p[2]||100,s5=+p[3]||50;return'<circle cx="'+(cx5-s5*.3)+'" cy="'+cy5+'" r="'+s5*.45+'" fill="#ecf0f1"/><circle cx="'+(cx5+s5*.15)+'" cy="'+(cy5-s5*.25)+'" r="'+s5*.55+'" fill="#ecf0f1"/><circle cx="'+(cx5+s5*.55)+'" cy="'+cy5+'" r="'+s5*.35+'" fill="#ecf0f1"/><rect x="'+(cx5-s5*.3)+'" y="'+cy5+'" width="'+s5*.85+'" height="'+s5*.3+'" rx="'+s5*.15+'" fill="#ecf0f1"/>'}
+  if(cmd==='!flower'){var cx6=+p[1]||200,cy6=+p[2]||150,s6=+p[3]||30,c6=G(p[4]);var r2='';for(var i3=0;i3<5;i3++){var a3=i3*Math.PI*2/5;r2+='<circle cx="'+(cx6+Math.cos(a3)*s6*.5)+'" cy="'+(cy6-Math.sin(a3)*s6*.5)+'" r="'+s6*.35+'" fill="'+c6+'"/>'}return r2+'<circle cx="'+cx6+'" cy="'+cy6+'" r="'+s6*.2+'" fill="#f1c40f"/>'}
+  if(cmd==='!tree'){var cx7=+p[1]||200,cy7=+p[2]||200,s7=+p[3]||60;return'<rect x="'+(cx7-s7*.08)+'" y="'+cy7+'" width="'+s7*.16+'" height="'+s7*.4+'" fill="#8B4513"/><polygon points="'+cx7+','+(cy7-s7*.4)+' '+(cx7-s7*.5)+','+cy7+' '+(cx7+s7*.5)+','+cy7+'" fill="#27ae60"/><polygon points="'+cx7+','+(cy7-s7*.15)+' '+(cx7-s7*.4)+','+(cy7+s7*.25)+' '+(cx7+s7*.4)+','+(cy7+s7*.25)+'" fill="#2ecc71"/>'}
+  if(cmd==='!house'){var cx8=+p[1]||200,cy8=+p[2]||160,s8=+p[3]||60;return'<rect x="'+(cx8-s8*.4)+'" y="'+(cy8-s8*.1)+'" width="'+s8*.8+'" height="'+s8*.6+'" fill="#e74c3c"/><polygon points="'+cx8+','+(cy8-s8*.5)+' '+(cx8-s8*.55)+','+(cy8-s8*.1)+' '+(cx8+s8*.55)+','+(cy8-s8*.1)+'" fill="#8B4513"/><rect x="'+(cx8-s8*.1)+'" y="'+(cy8+s8*.05)+'" width="'+s8*.2+'" height="'+s8*.45+'" fill="#f1c40f"/>'}
+  return'';}
+function parsePhoto(code){code=code.trim().replace(/<br\s*\/?>/gi,'\n');if(/<svg[\s\S]*<\/svg>/i.test(code)){if(!code.includes('xmlns'))code=code.replace('<svg','<svg xmlns="http://www.w3.org/2000/svg"');return'<div style="max-width:100%;overflow-x:auto">'+code+'</div>'}var svg='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><rect width="400" height="300" fill="#fafafa"/>';var lines=code.split('\n');for(var i=0;i<lines.length;i++){var line=lines[i].trim();if(line&&line.startsWith('!'))svg+=drawShape(line)}svg=svg+'</svg>';return'<div style="max-width:100%;overflow-x:auto">'+svg+'</div>';}
+
+/* ==================================================================
+ * 音频块提取 & 播放器
+ * ================================================================== */
+window._midi={};window._loops={};
+function voiceHtml(b,plain){
+  const inner='<span class="voice-icon">🔊</span><div class="voice-bar"><div class="voice-bar-inner" style="width:0%"></div></div><span class="voice-duration">'+b.label+'</span>';
+  if(plain)return'<div class="voice-bubble" data-midi="'+b.id+'">'+inner+'</div>';
+  return'<div class="audio-row"><div class="voice-bubble" data-midi="'+b.id+'" onclick="playMidi(this)">'+inner+'</div><button class="loop-btn" onclick="event.stopPropagation();toggleLoop(\''+b.id+'\',this)" title="循环">🔁</button></div>';
+}
+function ea(content){
+  var blocks=[];
+  content=content.replace(/```audio\n?([\s\S]*?)```/gi,function(_,code){
+    var id='midi_'+Date.now()+'_'+Math.random().toString(36).substr(2,6);
+    var data=parseMIDI(code);var mt=0;
+    data.tracks.forEach(function(t){t.notes.forEach(function(n){var e=(n.time+n.duration)*(60/data.bpm);if(e>mt)mt=e})});
+    var tl=Math.ceil(mt);var label=tl>=60?Math.floor(tl/60)+':'+String(tl%60).padStart(2,'0'):tl+'s';
+    blocks.push({id:id,data:data,label:label});
+    return voiceHtml({id:id,label:label},true);
+  });
+  return{html:content,blocks:blocks};
+}
+function toggleLoop(aid,btn){window._loops[aid]=!window._loops[aid];btn.classList.toggle('active',window._loops[aid])}
+function rel(el){el.querySelector('.voice-bar-inner').style.width='0%';el.querySelector('.voice-icon').textContent='🔊';if(el._pi){clearInterval(el._pi);el._pi=null}}
+window.playMidi=function(el){
+  var id=el.getAttribute('data-midi'),data=window._midi[id];
+  if(!data||!data.tracks)return;
+  if(el._c){el._c.close();el._c=null;if(el._lt)clearTimeout(el._lt);rel(el);return}
+  var looping=window._loops[id]||false;
+  try{
+    var ctx=new(window.AudioContext||window.webkitAudioContext)();window._globalCtx=ctx;el._c=ctx;
+    var now=ctx.currentTime;playMIDIBlock(data.tracks,data.bpm,ctx,now);
+    var bd=60/(data.bpm||120);var totalDur=0;
+    data.tracks.forEach(function(t){t.notes.forEach(function(n){var e=(n.time+n.duration)*bd+0.5;if(e>totalDur)totalDur=e})});
+    el.querySelector('.voice-icon').textContent='⏸';
+    var bar=el.querySelector('.voice-bar-inner');var startTime=Date.now();var totalMs=totalDur*1000;
+    el._pi=setInterval(function(){var elapsed=Date.now()-startTime;var pct=Math.min(100,Math.round(elapsed/totalMs*100));bar.style.width=pct+'%';if(pct>=100||!el._c){clearInterval(el._pi);el._pi=null}},100);
+    if(looping){
+      var sl=function(){if(!el._c)return;now=ctx.currentTime;playMIDIBlock(data.tracks,data.bpm,ctx,now);startTime=Date.now();totalMs=totalDur*1000;bar.style.width='0%';
+        el._pi=setInterval(function(){var elapsed=Date.now()-startTime;var pct=Math.min(100,Math.round(elapsed/totalMs*100));bar.style.width=pct+'%';if(pct>=100||!el._c){clearInterval(el._pi);el._pi=null}},100);
+        el._lt=setTimeout(sl,totalMs)};
+      el._lt=setTimeout(sl,totalMs);
+    }else{
+      setTimeout(function(){if(el._c){el._c.close();el._c=null;rel(el)}},totalMs+500);
+    }
+  }catch(e){console.error(e)}
+};
+
+/* ==================================================================
+ * 应用状态
+ * ================================================================== */
+let CONFIG=null;              // 服务端配置（密钥已打码）
+let chats=[];
+let currentId=null;
+let messages=[];              // [{role, content, thinking?}]
+let streaming=false;
+let aborter=null;
+let activeProvider=-1;        // -1 = 自动模式
+
+const boxEl=$('#messages'), welcomeEl=$('#welcome'), scrollEl=$('#chatScroll');
+const inputEl=$('#input'), btnSend=$('#btnSend');
+
+/* ---------- 富文本渲染 ---------- */
+function renderRich(content){
+  const ar=ea(content||'');
+  let raw=ar.html;
+  // photo 块先在原始文本上替换（此时换行还是 \n），再交给 marked，避免 <br> 破坏图形指令
+  raw=raw.replace(/【photo】\s*([\s\S]*?)\s*【\/photo】/gi,(_,c)=>'\n\n'+parsePhoto(c)+'\n\n');
+  let html=window.marked?marked.parse(raw):esc(raw);
+  html=html.replace(/【photo】\s*([\s\S]*?)\s*【\/photo】/gi,(_,c)=>parsePhoto(c));
+  ar.blocks.forEach(b=>{
+    window._midi[b.id]=b.data;window._loops[b.id]=false;
+    html=html.split(voiceHtml({id:b.id,label:b.label},true)).join(voiceHtml(b,false));
+  });
+  const div=document.createElement('div');
+  div.className='markdown';
+  div.innerHTML=html;
+  return div;
+}
+function makeThinking(thinking,open,liveSecs){
+  const blk=document.createElement('div');
+  blk.className='think-block'+(open?' open':'');
+  const label=liveSecs!=null?'正在思考 '+liveSecs+'s':'已深度思考';
+  blk.innerHTML='<div class="think-head">'+ICONS.chev+'<span class="think-label">'+label+'</span>'+(liveSecs!=null?'<span class="think-dots"><i></i><i></i><i></i></span>':'')+'</div><div class="think-wrap"><div class="think-inner"><div class="think-body"></div></div></div>';
+  blk.querySelector('.think-body').textContent=thinking||'';
+  blk.querySelector('.think-head').addEventListener('click',()=>blk.classList.toggle('open'));
+  return blk;
+}
+function makeActions(content){
+  const bar=document.createElement('div');
+  bar.className='msg-actions';
+  bar.innerHTML='<button title="复制">'+ICONS.copy+'</button><button title="重新生成">'+ICONS.regen+'</button>';
+  bar.children[0].addEventListener('click',()=>{
+    const txt=(navigator.clipboard&&navigator.clipboard.writeText)?navigator.clipboard.writeText(content):Promise.reject();
+    txt.then(()=>toast('已复制')).catch(()=>toast('复制失败'));
+  });
+  bar.children[1].addEventListener('click',()=>regenerate());
+  return bar;
+}
+function appendUser(text){
+  const d=document.createElement('div');
+  d.className='msg-user';
+  const b=document.createElement('div');b.className='bubble';b.textContent=text;
+  d.appendChild(b);boxEl.appendChild(d);
+  scrollBottom();
+  return d;
+}
+function appendAssistantShell(){
+  const d=document.createElement('div');
+  d.className='msg-assistant';
+  d.innerHTML='<div class="ava">'+ICONS.spark+'</div><div class="body"></div>';
+  boxEl.appendChild(d);
+  scrollBottom();
+  return d;
+}
+function buildAssistantContent(el,content,thinking){
+  const body=el.querySelector('.body');
+  body.innerHTML='';
+  if(thinking)body.appendChild(makeThinking(thinking,false,null));
+  body.appendChild(renderRich(content));
+  body.appendChild(makeActions(content));
+  scrollBottom();
+}
+function appendAssistantFinal(m){
+  const el=appendAssistantShell();
+  buildAssistantContent(el,m.content||'',m.thinking||'');
+  return el;
+}
+function appendError(msg){
+  const el=appendAssistantShell();
+  el.querySelector('.body').innerHTML='<div class="err-bubble">'+esc(msg)+'</div>';
+  scrollBottom();
+  return el;
+}
+function scrollBottom(){scrollEl.scrollTop=scrollEl.scrollHeight}
+function showWelcome(show){
+  welcomeEl.style.display=show?'flex':'none';
+}
+
+/* ==================================================================
+ * 流式发送
+ * ================================================================== */
+function setStreamingUI(on){
+  streaming=on;
+  btnSend.classList.toggle('stop',on);
+  btnSend.classList.remove('ready');
+  btnSend.innerHTML=on?ICONS.stop:ICONS.send;
+  btnSend.title=on?'停止生成':'发送';
+  $('#topStatus').classList.toggle('show',on);
+  inputEl.focus();
+}
+function updateInputUI(){
+  if(streaming)return;
+  btnSend.classList.toggle('ready',inputEl.value.trim().length>0);
+}
+
+async function send(text,regen){
+  text=(text!==undefined?text:inputEl.value).trim();
+  if(!text||streaming)return;
+  const usable=(CONFIG&&CONFIG.providers||[]).filter(p=>p.url&&p.model&&p.key);
+  if(!usable.length){toast('请先在设置中配置 API 线路');openSettings();return}
+
+  showWelcome(false);
+  if(!regen){
+    messages.push({role:'user',content:text});
+    appendUser(text);
+  }
+  inputEl.value='';autoResize();updateInputUI();
+
+  const el=appendAssistantShell();
+  const body=el.querySelector('.body');
+  body.innerHTML='<div class="think-head" style="cursor:default">正在思考<span class="think-dots"><i></i><i></i><i></i></span></div>';
+
+  setStreamingUI(true);
+  aborter=new AbortController();
+  let content='',thinking='',errMsg='',thinkStart=Date.now(),thinkTimer=null,thinkBlock=null,contentStarted=false;
+
+  try{
+    const resp=await fetch(API+'?action=generate',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({messages:messages.map(m=>({role:m.role,content:m.content})),provider:activeProvider}),
+      signal:aborter.signal
+    });
+    if(!resp.ok||!resp.body){
+      let detail='';
+      try{const j=await resp.json();detail=j.error||''}catch(e){}
+      throw new Error(detail||('请求失败 (HTTP '+resp.status+')'));
+    }
+    const reader=resp.body.getReader();
+    const dec=new TextDecoder();
+    let buf='',finished=false;
+    while(!finished){
+      const {done,value}=await reader.read();
+      if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let idx;
+      while((idx=buf.indexOf('\n'))>=0){
+        const line=buf.slice(0,idx).trim();
+        buf=buf.slice(idx+1);
+        if(!line.startsWith('data:'))continue;
+        const payload=line.slice(5).trim();
+        if(payload==='[DONE]'){finished=true;break}
+        let ev;try{ev=JSON.parse(payload)}catch(e){continue}
+        if(ev.error){errMsg=ev.error;finished=true;break}
+        if(ev.meta){$('#topStatusText').textContent='生成中 · '+ev.model;continue}
+        const d=ev.choices&&ev.choices[0]&&ev.choices[0].delta;
+        if(!d)continue;
+        if(d.reasoning_content){
+          thinking+=d.reasoning_content;
+          if(!contentStarted){
+            if(!thinkBlock){
+              body.innerHTML='';
+              thinkBlock=makeThinking(thinking,true,0);
+              body.appendChild(thinkBlock);
+              thinkTimer=setInterval(()=>{
+                const lb=thinkBlock.querySelector('.think-label');
+                if(lb)lb.textContent='正在思考 '+Math.round((Date.now()-thinkStart)/1000)+'s';
+              },1000);
+            }
+            thinkBlock.querySelector('.think-body').textContent=thinking;
+            scrollBottom();
+          }
+        }
+        if(d.content){
+          if(!contentStarted){
+            contentStarted=true;
+            if(thinkTimer){clearInterval(thinkTimer);thinkTimer=null}
+            if(thinkBlock){
+              const secs=Math.max(1,Math.round((Date.now()-thinkStart)/1000));
+              thinkBlock.classList.remove('open');
+              thinkBlock.querySelector('.think-label').textContent='已深度思考 '+secs+'s';
+              const dots=thinkBlock.querySelector('.think-dots');if(dots)dots.remove();
+            }
+            const md=document.createElement('div');md.className='markdown live';body.appendChild(md);
+          }
+          content+=d.content;
+          const liveEl=body.querySelector('.markdown.live');
+          if(liveEl){
+            liveEl.innerHTML=(window.marked?marked.parse(content):esc(content))+'<span class="cursor"></span>';
+            scrollBottom();
+          }
+        }
+      }
+    }
+  }catch(e){
+    if(e.name!=='AbortError')errMsg=errMsg||e.message;
+  }
+  if(thinkTimer)clearInterval(thinkTimer);
+  setStreamingUI(false);
+
+  const aborted=aborter&&aborter.signal.aborted;
+  if(content){
+    const liveEl=body.querySelector('.markdown.live');if(liveEl)liveEl.remove();
+    messages.push({role:'assistant',content,thinking});
+    buildAssistantContent(el,content,thinking);
+    saveChat();
+  }else{
+    el.remove();
+    if(!regen){/* 保留用户消息 */}
+    if(errMsg)appendError(errMsg);
+    else if(aborted)appendError('已停止生成');
+    else appendError('服务暂不可用');
+  }
+  updateInputUI();
+}
+
+function regenerate(){
+  if(streaming)return;
+  let i=messages.length-1;
+  while(i>=0&&messages[i].role!=='user')i--;
+  if(i<0)return;
+  const txt=messages[i].content;
+  messages=messages.slice(0,i+1);
+  // 移除最后一条 assistant DOM
+  const all=boxEl.querySelectorAll('.msg-assistant');
+  if(all.length)all[all.length-1].remove();
+  send(txt,true);
+}
+
+/* ==================================================================
+ * 会话持久化
+ * ================================================================== */
+async function saveChat(){
+  const firstUser=messages.find(m=>m.role==='user');
+  const title=(firstUser?firstUser.content:'新对话').slice(0,40);
+  try{
+    const resp=await fetch(API+'?action=chat',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id:currentId,title,messages})
+    });
+    const d=await resp.json();
+    if(d.ok){currentId=d.id;await loadChats()}
+  }catch(e){console.error('保存会话失败',e)}
+}
+async function loadChats(){
+  try{
+    const resp=await fetch(API+'?action=chats');
+    const d=await resp.json();
+    chats=d.chats||[];
+  }catch(e){chats=[]}
+  renderChatList();
+}
+function renderChatList(){
+  const list=$('#chatList');
+  list.innerHTML='';
+  if(!chats.length){
+    list.innerHTML='<div class="empty-hint">暂无对话<br>点击「新对话」开始创作</div>';
+    return;
+  }
+  const now=new Date();
+  const todayStart=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime()/1000;
+  const groups={'今天':[],'昨天':[],'过去 7 天':[],'更早':[]};
+  chats.forEach(c=>{
+    const t=c.updated_at;
+    if(t>=todayStart)groups['今天'].push(c);
+    else if(t>=todayStart-86400)groups['昨天'].push(c);
+    else if(t>=todayStart-7*86400)groups['过去 7 天'].push(c);
+    else groups['更早'].push(c);
+  });
+  Object.keys(groups).forEach(name=>{
+    const arr=groups[name];
+    if(!arr.length)return;
+    const lb=document.createElement('div');lb.className='group-label';lb.textContent=name;
+    list.appendChild(lb);
+    arr.forEach(c=>{
+      const item=document.createElement('div');
+      item.className='chat-item'+(c.id===currentId?' active':'');
+      item.innerHTML='<span class="t"></span><button class="del" title="删除">'+ICONS.trash+'</button>';
+      item.querySelector('.t').textContent=c.title;
+      item.addEventListener('click',()=>openChat(c.id));
+      item.querySelector('.del').addEventListener('click',async e=>{
+        e.stopPropagation();
+        try{await fetch(API+'?action=chat_delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:c.id})})}catch(err){}
+        if(currentId===c.id)newChat();
+        await loadChats();
+        toast('已删除');
+      });
+      list.appendChild(item);
+    });
+  });
+}
+async function openChat(id){
+  if(streaming)return;
+  try{
+    const resp=await fetch(API+'?action=chat&id='+encodeURIComponent(id));
+    if(!resp.ok)throw 0;
+    const c=await resp.json();
+    currentId=c.id;
+    messages=c.messages||[];
+    boxEl.innerHTML='';
+    showWelcome(false);
+    messages.forEach(m=>{
+      if(m.role==='user')appendUser(m.content);
+      else appendAssistantFinal(m);
+    });
+    renderChatList();
+    scrollBottom();
+    closeSidebarMobile();
+  }catch(e){toast('加载会话失败')}
+}
+function newChat(){
+  if(streaming)return;
+  currentId=null;
+  messages=[];
+  boxEl.innerHTML='';
+  showWelcome(true);
+  renderChatList();
+  closeSidebarMobile();
+  inputEl.focus();
+}
+
+/* ==================================================================
+ * 设置
+ * ================================================================== */
+async function loadConfig(){
+  try{
+    const resp=await fetch(API+'?action=config');
+    CONFIG=await resp.json();
+  }catch(e){CONFIG={name:'Easy AI',prompt:'',providers:[{url:'',key:'',model:''},{url:'',key:'',model:''},{url:'',key:'',model:''}]}}
+  document.title=CONFIG.name||'Easy AI';
+  buildModelMenu();
+}
+function buildModelMenu(){
+  const menu=$('#modelMenu');
+  menu.innerHTML='';
+  const auto=document.createElement('div');
+  auto.className='model-item'+(activeProvider===-1?' on':'');
+  auto.innerHTML='<div class="nm">自动模式</div><div class="ds">按线路顺序自动故障转移</div>';
+  auto.addEventListener('click',()=>{activeProvider=-1;syncModelBtn();menu.parentElement.classList.remove('open')});
+  menu.appendChild(auto);
+  (CONFIG.providers||[]).forEach((p,i)=>{
+    if(!p.url||!p.model)return;
+    const it=document.createElement('div');
+    it.className='model-item'+(activeProvider===i?' on':'');
+    it.innerHTML='<div class="nm"></div><div class="ds"></div>';
+    it.querySelector('.nm').textContent=p.model;
+    it.querySelector('.ds').textContent='线路 '+(i+1)+' · '+p.url.replace(/^https?:\/\//,'').split('/')[0];
+    it.addEventListener('click',()=>{activeProvider=i;syncModelBtn();menu.parentElement.classList.remove('open')});
+    menu.appendChild(it);
+  });
+  syncModelBtn();
+}
+function syncModelBtn(){
+  const nameEl=$('#modelName');
+  if(activeProvider>=0&&CONFIG.providers[activeProvider]&&CONFIG.providers[activeProvider].model){
+    nameEl.textContent=CONFIG.providers[activeProvider].model;
+  }else{
+    nameEl.textContent='自动模式';
+  }
+  buildModelMenu._skip=true;
+  // 重建勾选状态
+  const items=$('#modelMenu').children;
+  Array.from(items).forEach(it=>it.classList.remove('on'));
+  if(activeProvider===-1&&items[0])items[0].classList.add('on');
+}
+function openSettings(){
+  $('#cfgName').value=CONFIG.name||'';
+  $('#cfgPrompt').value=CONFIG.prompt||'';
+  const wrap=$('#providerList');
+  wrap.innerHTML='';
+  (CONFIG.providers||[]).forEach((p,i)=>{
+    const card=document.createElement('div');
+    card.className='provider-card';
+    card.innerHTML='<div class="pc-title">线路 '+(i+1)+'</div>'
+      +'<label>API URL</label><input class="p-url" placeholder="https://api.openai.com/v1/chat/completions">'
+      +'<label>API Key</label><input class="p-key" type="password" placeholder="留空保持不变">'
+      +'<label>模型</label><input class="p-model" placeholder="gpt-4o-mini">';
+    card.querySelector('.p-url').value=p.url||'';
+    card.querySelector('.p-key').value=p.key||'';
+    card.querySelector('.p-model').value=p.model||'';
+    wrap.appendChild(card);
+  });
+  $('#setOverlay').classList.add('open');
+}
+function closeSettings(){$('#setOverlay').classList.remove('open')}
+async function saveSettings(){
+  const providers=Array.from(document.querySelectorAll('.provider-card')).map(card=>({
+    url:card.querySelector('.p-url').value.trim(),
+    key:card.querySelector('.p-key').value.trim(),
+    model:card.querySelector('.p-model').value.trim()
+  }));
+  try{
+    const resp=await fetch(API+'?action=config',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name:$('#cfgName').value.trim(),prompt:$('#cfgPrompt').value.trim(),providers})
+    });
+    const d=await resp.json();
+    if(d.ok){
+      toast('设置已保存');
+      closeSettings();
+      await loadConfig();
+    }else toast(d.error||'保存失败');
+  }catch(e){toast('保存失败：网络错误')}
+}
+
+/* ==================================================================
+ * 侧边栏 & UI 交互
+ * ================================================================== */
+function isMobile(){return window.innerWidth<=768}
+function closeSidebarMobile(){if(isMobile())$('#app').classList.remove('sb-open')}
+$('#btnCollapse').addEventListener('click',()=>{
+  if(isMobile())$('#app').classList.remove('sb-open');
+  else $('#app').classList.toggle('sb-collapsed');
+});
+$('#btnMenu').addEventListener('click',()=>{
+  if(isMobile())$('#app').classList.toggle('sb-open');
+  else $('#app').classList.toggle('sb-collapsed');
+});
+$('#backdrop').addEventListener('click',()=>$('#app').classList.remove('sb-open'));
+$('#btnBrand').addEventListener('click',()=>{
+  if(isMobile())$('#app').classList.remove('sb-open');
+  else $('#app').classList.toggle('sb-collapsed');
+});
+$('#btnNewChat').addEventListener('click',newChat);
+$('#btnSettings').addEventListener('click',openSettings);
+$('#setClose').addEventListener('click',closeSettings);
+$('#setCancel').addEventListener('click',closeSettings);
+$('#setSave').addEventListener('click',saveSettings);
+$('#setOverlay').addEventListener('click',e=>{if(e.target.id==='setOverlay')closeSettings()});
+$('#modelBtn').addEventListener('click',e=>{e.stopPropagation();$('#modelSel').classList.toggle('open')});
+document.addEventListener('click',()=>$('#modelSel').classList.remove('open'));
+document.querySelectorAll('.sugg-card').forEach(c=>{
+  c.addEventListener('click',()=>send(c.dataset.q));
+});
+
+btnSend.addEventListener('click',()=>{
+  if(streaming){if(aborter)aborter.abort();return}
+  send();
+});
+inputEl.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();send()}
+});
+inputEl.addEventListener('input',()=>{autoResize();updateInputUI()});
+function autoResize(){
+  inputEl.style.height='auto';
+  inputEl.style.height=Math.min(inputEl.scrollHeight,200)+'px';
+}
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){closeSettings();$('#modelSel').classList.remove('open')}
+});
+
+/* ==================================================================
+ * 启动
+ * ================================================================== */
+(async function init(){
+  await loadConfig();
+  await loadChats();
+  showWelcome(true);
+  inputEl.focus();
+})();
+</script>
+</body>
+</html>
