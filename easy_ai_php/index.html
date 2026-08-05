@@ -1166,14 +1166,16 @@ function appendError(msg){
   scrollBottom();
   return el;
 }
-// 联网搜索来源卡片
+// 联网搜索来源卡片（重复推送时替换而非叠加）
 function renderWebSources(shellEl,results){
   if(!results||!results.length)return;
   const body=shellEl.querySelector('.body');
+  const old=body.querySelector('.web-sources');
+  if(old)old.remove();
   const box=document.createElement('div');
   box.className='web-sources';
   box.innerHTML='<span class="ws-label">'+ICONS.globe+'<span>搜索来源</span></span>';
-  results.slice(0,5).forEach((r,i)=>{
+  results.slice(0,8).forEach((r,i)=>{
     const a=document.createElement('a');
     a.className='ws-chip';a.href=r.url;a.target='_blank';a.rel='noopener';a.title=r.url;
     a.textContent=(i+1)+' · '+(r.title||r.url);
@@ -1221,7 +1223,6 @@ async function send(text,regen){
   body.innerHTML='<div class="think-head" style="cursor:default">正在思考<span class="think-dots"><i></i><i></i><i></i></span></div>';
 
   setStreamingUI(true);
-  $('#topStatusText').textContent=webEnabled?'正在联网搜索…':'生成中';
   aborter=new AbortController();
   let content='',thinking='',errMsg='',thinkStart=Date.now(),thinkTimer=null,thinkBlock=null,contentStarted=false,webResults=null;
 
@@ -1253,8 +1254,8 @@ async function send(text,regen){
         if(payload==='[DONE]'){finished=true;break}
         let ev;try{ev=JSON.parse(payload)}catch(e){continue}
         if(ev.error){errMsg=ev.error;finished=true;break}
-        if(ev.web_results){webResults=ev.web_results;renderWebSources(el,webResults);continue}
-        if(ev.meta){$('#topStatusText').textContent='生成中 · '+ev.model;continue}
+        if(ev.web_results){webResults=ev.web_results;renderWebSources(el,webResults);$('#topStatusText').textContent='已联网搜索 · '+webResults.length+' 条来源';continue}
+        if(ev.meta){$('#topStatusText').textContent=(webResults?'已联网搜索 · '+webResults.length+' 条来源 · ':'生成中 · ')+ev.model;continue}
         const d=ev.choices&&ev.choices[0]&&ev.choices[0].delta;
         if(!d)continue;
         if(d.reasoning_content){
@@ -1942,13 +1943,13 @@ $('#searchInput').addEventListener('input',e=>{
  * ================================================================== */
 function syncWebBtn(){
   $('#btnWeb').classList.toggle('active',webEnabled);
-  $('#btnWeb').title=webEnabled?'联网搜索：开（回答前先搜网页）':'联网搜索：关';
+  $('#btnWeb').title=webEnabled?'联网搜索：开（模型按需自动搜索网页）':'联网搜索：关';
 }
 $('#btnWeb').addEventListener('click',()=>{
   webEnabled=!webEnabled;
   localStorage.setItem('ea_web',webEnabled?'1':'0');
   syncWebBtn();
-  toast(webEnabled?'联网搜索已开启':'联网搜索已关闭');
+  toast(webEnabled?'联网搜索已开启 · 模型按需自动搜索':'联网搜索已关闭');
 });
 $('#btnExport').addEventListener('click',e=>{
   if(!currentId){toast('当前没有可导出的对话');return}

@@ -599,40 +599,78 @@ case 'generate':
         @flush();
     };
 
-    /* ---- 联网搜索：先搜、抓正文、注入到最后一条用户消息 ---- */
+    /* ---- 联网搜索：优先 Tools（模型按需自主搜索），不支持 tools 的线路回退预注入 ---- */
     $web = !empty($body['web']);
-    if ($web) {
-        $lastUser = '';
-        $lastIdx = -1;
-        foreach ($full as $k => $m) {
-            if ($m['role'] === 'user') { $lastUser = $m['content']; $lastIdx = $k; }
-        }
-        $q = str_cut(trim((string)preg_replace('/\s+/', ' ', $lastUser)), 80);
-        if ($q !== '' && $lastIdx >= 0) {
-            $results = web_search($q, 5);
-            $top = array_slice($results, 0, 4);
-            $emit = [];
-            foreach ($top as $r) $emit[] = ['title' => $r['title'], 'url' => $r['url']];
-            $sse(['web_results' => $emit]);
-            if ($top) {
-                $pages = fetch_pages(array_map(function ($r) { return $r['url']; }, $top));
-                $ctx = "【互联网搜索结果】检索时间：" . date('Y-m-d H:i') . "。请优先依据下列资料回答用户问题，引用时用 [n] 标注来源序号；若资料与问题无关则忽略资料、直接回答。\n\n";
-                foreach ($top as $i => $r) {
-                    $ctx .= '[' . ($i + 1) . '] ' . $r['title'] . "\n链接: " . $r['url'] . "\n";
-                    $pageText = isset($pages[$r['url']]) ? $pages[$r['url']] : '';
-                    $ctx .= ($pageText !== '' ? $pageText : $r['snippet']) . "\n\n";
-                }
-                $full[$lastIdx]['content'] = $ctx . "【用户问题】" . $full[$lastIdx]['content'];
-            }
-        }
-    }
+    $webTools = $web ? [[
+        'type' => 'function',
+        'function' => [
+            'name' => 'web_search',
+            'description' => '搜索互联网获取实时信息（最新新闻、产品发布、价格、赛事、天气、时效性事实等）。当用户问题需要最新信息或事实核查时必须调用；query 使用提炼后的简洁关键词。',
+            'parameters' => [
+                'type' => 'object',
+                'properties' => [
+                    'query' => ['type' => 'string', 'description' => '搜索关键词，简洁准确']
+                ],
+                'required' => ['query']
+            ]
+        ]
+    ]] : null;
 
+    $conv = $full;          // 工作消息（含 tool 历史）
     $done = false;
-    foreach ($order as $idx) {
-        $p = $cfg['providers'][$idx];
-        $ok = stream_from_provider($p, $full, $sse);
-        if ($ok) { $done = true; break; }
-        if (connection_aborted()) break;
+    $toolRounds = 0;
+    $allSources = [];
+    $toolUnsupported = false;
+
+    while (!$done) {
+        $useTools = ($webTools !== null && $toolRounds < 3) ? $webTools : null;
+        $okAny = false;
+        $toolCalls = null;
+        foreach ($order as $idx) {
+            $p = $cfg['providers'][$idx];
+            $errText = '';
+            $ok = stream_from_provider($p, $conv, $sse, $useTools, $toolCalls, $errText);
+            if ($ok) { $okAny = true; break; }
+            if (connection_aborted()) break 2;
+            if ($errText !== '' && preg_match('/tools?|function|工具|参数/i', $errText)) $toolUnsupported = true;
+        }
+
+        if (!$okAny) {
+            // 全部线路失败：若因不支持 tools → 回退为预注入方式重试
+            if ($useTools !== null && $toolUnsupported) {
+                $webTools = null;
+                $toolUnsupported = false;
+                inject_web_context($conv, $sse, $allSources);
+                continue;
+            }
+            break;
+        }
+
+        if (is_array($toolCalls) && $toolCalls) {
+            // 模型要求搜索 → 执行工具并把结果喂回去继续对话
+            $asToolCalls = [];
+            foreach ($toolCalls as $tc) {
+                $asToolCalls[] = [
+                    'id' => $tc['id'],
+                    'type' => 'function',
+                    'function' => ['name' => $tc['name'], 'arguments' => $tc['arguments']]
+                ];
+            }
+            $conv[] = ['role' => 'assistant', 'content' => '', 'tool_calls' => $asToolCalls];
+            foreach ($toolCalls as $tc) {
+                $args = json_decode((string)$tc['arguments'], true);
+                if (!is_array($args)) $args = [];
+                $result = ($tc['name'] === 'web_search')
+                    ? exec_web_search_tool($args, $allSources)
+                    : '未知工具';
+                $conv[] = ['role' => 'tool', 'tool_call_id' => $tc['id'], 'content' => $result];
+            }
+            $sse(['web_results' => $allSources]);
+            $toolRounds++;
+            continue;
+        }
+
+        $done = true;
     }
 
     if (!$done && !headers_sent()) {
@@ -654,9 +692,58 @@ default:
 exit;
 
 /* ------------------------------------------------------------------ */
-/* 单个线路的流式请求。成功输出过内容返回 true，否则 false              */
+/* 联网搜索工具执行 + 预注入兜底                                       */
 /* ------------------------------------------------------------------ */
-function stream_from_provider($provider, $messages, $sse) {
+
+// 执行 web_search 工具调用：搜索 + 抓正文，返回给模型的文本资料
+function exec_web_search_tool($args, &$allSources) {
+    $q = str_cut(trim((string)($args['query'] ?? '')), 80);
+    if ($q === '') return '没有提供搜索关键词。';
+    $results = web_search($q, 5);
+    $top = array_slice($results, 0, 4);
+    if (!$top) return '未搜索到与「' . $q . '」相关的网页内容。';
+    foreach ($top as $r) $allSources[] = ['title' => $r['title'], 'url' => $r['url']];
+    $pages = fetch_pages(array_map(function ($r) { return $r['url']; }, $top));
+    $text = '检索时间：' . date('Y-m-d H:i') . '，共 ' . count($top) . " 条结果：\n\n";
+    foreach ($top as $i => $r) {
+        $text .= '[' . ($i + 1) . '] ' . $r['title'] . "\nURL: " . $r['url'] . "\n";
+        $pageText = isset($pages[$r['url']]) ? $pages[$r['url']] : '';
+        $text .= ($pageText !== '' ? $pageText : $r['snippet']) . "\n\n";
+    }
+    return $text;
+}
+
+// 兜底方案：预搜索并注入最后一条用户消息（用于不支持 Tools 的线路）
+function inject_web_context(&$conv, $sse, &$allSources) {
+    $lastUser = '';
+    $lastIdx = -1;
+    foreach ($conv as $k => $m) {
+        if (($m['role'] ?? '') === 'user') { $lastUser = (string)($m['content'] ?? ''); $lastIdx = $k; }
+    }
+    $q = str_cut(trim((string)preg_replace('/\s+/', ' ', $lastUser)), 80);
+    if ($q === '' || $lastIdx < 0) return;
+    $results = web_search($q, 5);
+    $top = array_slice($results, 0, 4);
+    if (!$top) return;
+    foreach ($top as $r) $allSources[] = ['title' => $r['title'], 'url' => $r['url']];
+    $sse(['web_results' => $allSources]);
+    $pages = fetch_pages(array_map(function ($r) { return $r['url']; }, $top));
+    $ctx = "【互联网搜索结果】检索时间：" . date('Y-m-d H:i') . "。请优先依据下列资料回答用户问题，引用时用 [n] 标注来源序号；若资料与问题无关则忽略资料、直接回答。\n\n";
+    foreach ($top as $i => $r) {
+        $ctx .= '[' . ($i + 1) . '] ' . $r['title'] . "\n链接: " . $r['url'] . "\n";
+        $pageText = isset($pages[$r['url']]) ? $pages[$r['url']] : '';
+        $ctx .= ($pageText !== '' ? $pageText : $r['snippet']) . "\n\n";
+    }
+    $conv[$lastIdx]['content'] = $ctx . "【用户问题】" . $conv[$lastIdx]['content'];
+}
+
+/* ------------------------------------------------------------------ */
+/* 单个线路的流式请求（支持 Tools 多轮）。成功返回 true                 */
+/* $toolCallsOut：若本轮是纯 tool_calls（无正文），返回解析出的调用列表  */
+/* ------------------------------------------------------------------ */
+function stream_from_provider($provider, $messages, $sse, $tools = null, &$toolCallsOut = null, &$errOut = '') {
+    $toolCallsOut = null;
+    $errOut = '';
     $payload = [
         'model'       => $provider['model'],
         'messages'    => $messages,
@@ -664,12 +751,19 @@ function stream_from_provider($provider, $messages, $sse) {
         'temperature' => 0.6,
         'max_tokens'  => 4096,
     ];
+    if ($tools !== null) {
+        $payload['tools'] = $tools;
+        $payload['tool_choice'] = 'auto';
+    }
 
     $isSSE    = null;
     $started  = false;
     $jsonBuf  = '';
     $errBuf   = '';
     $httpCode = 0;
+    $lineBuf  = '';
+    $acc      = [];       // index => ['id','name','arguments'] 累积的 tool_calls 分片
+    $hasContent = false;
 
     $ch = curl_init();
     curl_setopt_array($ch, [
@@ -694,7 +788,7 @@ function stream_from_provider($provider, $messages, $sse) {
             }
             return strlen($header);
         },
-        CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$isSSE, &$started, &$jsonBuf, &$errBuf, &$httpCode, $sse, $provider) {
+        CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$isSSE, &$started, &$jsonBuf, &$errBuf, &$httpCode, &$lineBuf, &$acc, &$hasContent, $sse, $provider) {
             $httpCode = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
             if (connection_aborted()) return -1;
 
@@ -708,26 +802,64 @@ function stream_from_provider($provider, $messages, $sse) {
             }
             if ($isSSE === false) {
                 $jsonBuf .= $chunk;
-            } else {
-                echo $chunk;
-                @flush();
+                return strlen($chunk);
             }
+            // 逐行转发（过滤上游 [DONE]，最终由后端统一补发），同时解析 tool_calls 分片
+            $lineBuf .= $chunk;
+            while (($pos = strpos($lineBuf, "\n")) !== false) {
+                $rawLine = substr($lineBuf, 0, $pos);
+                $lineBuf = substr($lineBuf, $pos + 1);
+                $line = trim($rawLine);
+                if ($line === '') continue;
+                if ($line === 'data: [DONE]' || $line === 'data:[DONE]') continue;
+                echo $rawLine . "\n";
+                if (strpos($line, 'data:') !== 0) continue;
+                $pl = trim(substr($line, 5));
+                if ($pl === '') continue;
+                $ev = json_decode($pl, true);
+                if (!is_array($ev) || empty($ev['choices']) || !is_array($ev['choices'])) continue;
+                $ch0 = $ev['choices'][0];
+                $delta = (isset($ch0['delta']) && is_array($ch0['delta'])) ? $ch0['delta'] : [];
+                if (!empty($delta['content'])) $hasContent = true;
+                if (!empty($delta['tool_calls']) && is_array($delta['tool_calls'])) {
+                    foreach ($delta['tool_calls'] as $tc) {
+                        $i = isset($tc['index']) ? (int)$tc['index'] : 0;
+                        if (!isset($acc[$i])) $acc[$i] = ['id' => '', 'name' => '', 'arguments' => ''];
+                        if (!empty($tc['id'])) $acc[$i]['id'] = (string)$tc['id'];
+                        if (!empty($tc['function']['name'])) $acc[$i]['name'] .= (string)$tc['function']['name'];
+                        if (!empty($tc['function']['arguments'])) $acc[$i]['arguments'] .= (string)$tc['function']['arguments'];
+                    }
+                }
+            }
+            @flush();
             return strlen($chunk);
         },
     ]);
 
     curl_exec($ch);
-    $curlErr  = curl_error($ch);
     $httpCode = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
     curl_close($ch);
 
-    if (!$started) return false;
-    if ($httpCode >= 400) return false;
+    if (!$started) { $errOut = $errBuf; return false; }
+    if ($httpCode >= 400) { $errOut = $errBuf; return false; }
 
+    // 非流式上游
     if ($isSSE === false && $jsonBuf !== '') {
         $data = json_decode($jsonBuf, true);
         if (is_array($data) && isset($data['choices'][0]['message'])) {
             $msg = $data['choices'][0]['message'];
+            if (!empty($msg['tool_calls']) && is_array($msg['tool_calls'])) {
+                $tcs = [];
+                foreach ($msg['tool_calls'] as $i => $tc) {
+                    $tcs[] = [
+                        'id'        => (string)($tc['id'] ?? ('call_' . $i)),
+                        'name'      => (string)(isset($tc['function']['name']) ? $tc['function']['name'] : 'web_search'),
+                        'arguments' => (string)(isset($tc['function']['arguments']) ? $tc['function']['arguments'] : '{}'),
+                    ];
+                }
+                $toolCallsOut = $tcs;
+                return true;
+            }
             $delta = [];
             if (!empty($msg['reasoning_content'])) $delta['reasoning_content'] = (string)$msg['reasoning_content'];
             if (!empty($msg['content']))           $delta['content']           = (string)$msg['content'];
@@ -737,6 +869,20 @@ function stream_from_provider($provider, $messages, $sse) {
             $sse(['error' => '线路返回错误：' . $reason]);
             return false;
         }
+    }
+
+    // 流结束：纯 tool_calls 轮（没有正文）→ 返回解析出的调用
+    if (!$hasContent && $acc) {
+        $tcs = [];
+        foreach ($acc as $i => $t) {
+            if ($t['name'] === '' && $t['arguments'] === '') continue;
+            $tcs[] = [
+                'id'        => $t['id'] !== '' ? $t['id'] : ('call_' . $i),
+                'name'      => $t['name'] !== '' ? $t['name'] : 'web_search',
+                'arguments' => $t['arguments'] !== '' ? $t['arguments'] : '{}',
+            ];
+        }
+        if ($tcs) { $toolCallsOut = $tcs; return true; }
     }
 
     return true;
