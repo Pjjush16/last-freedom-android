@@ -9,7 +9,10 @@
 | 文件 | 说明 |
 | --- | --- |
 | `index.html` | 前端，Open WebUI 风格，单文件，明暗双主题 |
-| `api.php` | 后端，配置/会话/文件夹/分享/提示词 + SSE 流式代理 |
+| `api.php` | 后端，配置/会话/文件夹/分享/提示词/上传 + SSE 流式代理 + 工具分发 |
+| `soundfonts/` | 47 种乐器真实采样（FluidR3 GM，约 110MB），同源加载不依赖外部 CDN |
+| `start.sh` | 启动脚本，`./start.sh [端口]`，默认 8880 |
+| `fetch_samples.sh` | 采样补全脚本（可选，采样已内置；用于重新下载/补全） |
 
 ## 功能清单
 
@@ -28,6 +31,11 @@
 - 提示词库：保存常用提示词，一键填入输入框
 - 明暗主题切换、快捷键（Ctrl+K 搜索、Ctrl+Shift+O 新对话、Esc 关闭弹层）
 
+**音频引擎（双引擎）**
+- **真实乐器采样**：内置 FluidR3 GM SoundFont 的 47 种乐器真实录音采样（soundfonts/ 目录，约 110MB），钢琴/提琴/吉他/管乐等全部用真实音色播放；消息渲染时自动预加载，点击播放前完成解码
+- **物理建模兜底**：原 easy_ai 的 Web Audio 物理建模引擎（14 类合成引擎）完整保留——鼓组等无采样乐器、采样加载失败时自动接管，任何情况下都能出声
+- 混响/力度响应两种引擎共用，听感一致
+
 **渲染增强**
 - Markdown（marked）
 - 代码高亮（highlight.js）+ 代码块语言标签、一键复制
@@ -39,11 +47,12 @@
 
 ## 部署
 
-- 环境：PHP >= 7.4 + curl 扩展（docx 解析需 zip 扩展；不强依赖 mbstring）。无框架、无数据库。
-- 两个文件放同一目录，`data/` 自动创建（配置、会话、上传文件都在里面，注意备份和访问控制）。
-- 本地体验：`php -S 0.0.0.0:8080 -d upload_max_filesize=20M -d post_max_size=25M`，打开 `http://localhost:8080`。
+- 环境：PHP >= 7.4 + curl + zip 扩展（docx 解析需 zip；不强依赖 mbstring）。无框架、无数据库。
+- 整个目录放到网站目录即可，`data/` 自动创建（配置、会话、上传文件都在里面，注意备份和访问控制）。
+- 本地体验：`./start.sh`（等价于 `php -S 0.0.0.0:8880 -d upload_max_filesize=20M -d post_max_size=25M`）。
 - 生产建议 Nginx/Apache + PHP-FPM；Nginx 反代需加 `proxy_buffering off;`（SSE 需要），并在 php.ini 调大 `upload_max_filesize` / `post_max_size`。
 - 可选：`apt install poppler-utils`（pdftotext）获得更好的 PDF 文本提取。
+- 采样走同源相对路径 `soundfonts/`，保持 index.html 与 soundfonts/ 的相对位置不变即可；Nginx 给 .js 开 gzip 可加速首次加载。
 
 ## 使用
 
