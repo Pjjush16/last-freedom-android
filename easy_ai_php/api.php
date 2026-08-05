@@ -153,6 +153,139 @@ function clean_id($s) {
     return preg_replace('/[^A-Za-z0-9_\-]/', '', (string)$s);
 }
 
+/* ------------------------------------------------------------------ */
+/* 免 Key 网页搜索（DuckDuckGo HTML 为主，Bing 兜底）+ 网页正文抓取     */
+/* ------------------------------------------------------------------ */
+
+function http_get($url, $timeout = 10, $post = null) {
+    $ch = curl_init();
+    curl_setopt_array($ch, [
+        CURLOPT_URL            => $url,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_MAXREDIRS      => 4,
+        CURLOPT_TIMEOUT        => $timeout,
+        CURLOPT_CONNECTTIMEOUT => 8,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => 0,
+        CURLOPT_ENCODING       => '',
+        CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        CURLOPT_HTTPHEADER     => ['Accept-Language: zh-CN,zh;q=0.9,en;q=0.8'],
+    ]);
+    if ($post !== null) {
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, is_array($post) ? http_build_query($post) : $post);
+    }
+    $body = curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    curl_close($ch);
+    return ($code >= 200 && $code < 400 && $body !== false) ? $body : '';
+}
+
+function html_to_text($html) {
+    $html = preg_replace('/<(script|style|noscript|svg|head|form|nav|footer|header)[\s\S]*?<\/\1>/i', ' ', $html);
+    $html = preg_replace('/<br\s*\/?>/i', "\n", $html);
+    $html = preg_replace('/<\/(p|div|li|h\d|tr|td|section|article)>/i', "\n", $html);
+    $text = strip_tags($html);
+    $text = html_entity_decode($text, ENT_QUOTES, 'UTF-8');
+    $text = preg_replace('/[ \t\r]+/', ' ', $text);
+    $text = preg_replace('/\n\s*\n+/', "\n", $text);
+    return trim($text);
+}
+
+function ddg_search($q, $max) {
+    $html = http_get('https://html.duckduckgo.com/html/', 12, ['q' => $q, 'kl' => 'cn-zh']);
+    if ($html === '') return [];
+    $out = [];
+    preg_match_all('/<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i', $html, $hits, PREG_SET_ORDER);
+    preg_match_all('/<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/i', $html, $snips);
+    foreach ($hits as $i => $hit) {
+        if (count($out) >= $max) break;
+        $url = html_entity_decode($hit[1], ENT_QUOTES);
+        if (strpos($url, 'uddg=') !== false) {
+            $qs = [];
+            parse_str((string)parse_url($url, PHP_URL_QUERY), $qs);
+            if (!empty($qs['uddg'])) $url = $qs['uddg'];
+        }
+        $title = trim(html_entity_decode(strip_tags($hit[2]), ENT_QUOTES));
+        $snippet = isset($snips[1][$i]) ? trim(html_entity_decode(strip_tags($snips[1][$i]), ENT_QUOTES)) : '';
+        if ($url !== '' && $title !== '' && strpos($url, 'http') === 0) {
+            $out[] = ['title' => $title, 'url' => $url, 'snippet' => $snippet];
+        }
+    }
+    return $out;
+}
+
+function bing_search($q, $max) {
+    $html = http_get('https://www.bing.com/search?q=' . urlencode($q) . '&setlang=zh-CN&count=' . $max, 12);
+    if ($html === '') return [];
+    $out = [];
+    preg_match_all('/<li[^>]*class="b_algo"[\s\S]*?<\/li>/i', $html, $blocks);
+    foreach ($blocks[0] as $blk) {
+        if (count($out) >= $max) break;
+        if (!preg_match('/<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i', $blk, $m)) continue;
+        $url = html_entity_decode($m[1], ENT_QUOTES);
+        $title = trim(html_entity_decode(strip_tags($m[2]), ENT_QUOTES));
+        $snippet = '';
+        if (preg_match('/<p[^>]*>([\s\S]*?)<\/p>/i', $blk, $pm)) {
+            $snippet = trim(html_entity_decode(strip_tags($pm[1]), ENT_QUOTES));
+        }
+        if ($url !== '' && $title !== '') $out[] = ['title' => $title, 'url' => $url, 'snippet' => $snippet];
+    }
+    return $out;
+}
+
+function web_search($q, $max = 5) {
+    $results = ddg_search($q, $max);
+    if (count($results) < 2) {
+        $b = bing_search($q, $max);
+        if (count($b) > count($results)) $results = $b;
+    }
+    return $results;
+}
+
+// 并发抓取搜索结果正文（curl_multi），每页截断为纯文本
+function fetch_pages($urls, $maxChars = 1200) {
+    $urls = array_slice(array_values($urls), 0, 4);
+    if (!$urls) return [];
+    $mh = curl_multi_init();
+    $handles = [];
+    foreach ($urls as $u) {
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL            => $u,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS      => 3,
+            CURLOPT_TIMEOUT        => 9,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => 0,
+            CURLOPT_ENCODING       => '',
+            CURLOPT_MAXFILESIZE    => 2000000,
+            CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        ]);
+        curl_multi_add_handle($mh, $ch);
+        $handles[$u] = $ch;
+    }
+    $running = null;
+    do {
+        curl_multi_exec($mh, $running);
+        if ($running) curl_multi_select($mh, 0.2);
+    } while ($running > 0);
+    $out = [];
+    foreach ($handles as $u => $ch) {
+        $body = curl_multi_getcontent($ch);
+        curl_multi_remove_handle($mh, $ch);
+        curl_close($ch);
+        if (!$body) continue;
+        $text = html_to_text($body);
+        if ($text !== '') $out[$u] = str_cut($text, $maxChars);
+    }
+    curl_multi_close($mh);
+    return $out;
+}
+
 function read_chat_file($id) {
     if ($id === '') return null;
     $c = jread(CHATS_DIR . '/' . $id . '.json', null);
@@ -407,6 +540,13 @@ case 'prompt_delete':
     json_out(['ok' => true]);
     break;
 
+/* ---------------- 独立搜索（调试用） ---------------- */
+case 'websearch':
+    $q = trim((string)($_GET['q'] ?? ''));
+    if ($q === '') json_err('q 不能为空');
+    json_out(['results' => web_search($q, 6)]);
+    break;
+
 /* ---------------- 流式生成 ---------------- */
 case 'generate':
     if (!function_exists('curl_init')) json_err('服务器缺少 PHP curl 扩展', 500);
@@ -458,6 +598,34 @@ case 'generate':
         echo 'data: ' . json_encode($arr, JSON_UNESCAPED_UNICODE) . "\n\n";
         @flush();
     };
+
+    /* ---- 联网搜索：先搜、抓正文、注入到最后一条用户消息 ---- */
+    $web = !empty($body['web']);
+    if ($web) {
+        $lastUser = '';
+        $lastIdx = -1;
+        foreach ($full as $k => $m) {
+            if ($m['role'] === 'user') { $lastUser = $m['content']; $lastIdx = $k; }
+        }
+        $q = str_cut(trim((string)preg_replace('/\s+/', ' ', $lastUser)), 80);
+        if ($q !== '' && $lastIdx >= 0) {
+            $results = web_search($q, 5);
+            $top = array_slice($results, 0, 4);
+            $emit = [];
+            foreach ($top as $r) $emit[] = ['title' => $r['title'], 'url' => $r['url']];
+            $sse(['web_results' => $emit]);
+            if ($top) {
+                $pages = fetch_pages(array_map(function ($r) { return $r['url']; }, $top));
+                $ctx = "【互联网搜索结果】检索时间：" . date('Y-m-d H:i') . "。请优先依据下列资料回答用户问题，引用时用 [n] 标注来源序号；若资料与问题无关则忽略资料、直接回答。\n\n";
+                foreach ($top as $i => $r) {
+                    $ctx .= '[' . ($i + 1) . '] ' . $r['title'] . "\n链接: " . $r['url'] . "\n";
+                    $pageText = isset($pages[$r['url']]) ? $pages[$r['url']] : '';
+                    $ctx .= ($pageText !== '' ? $pageText : $r['snippet']) . "\n\n";
+                }
+                $full[$lastIdx]['content'] = $ctx . "【用户问题】" . $full[$lastIdx]['content'];
+            }
+        }
+    }
 
     $done = false;
     foreach ($order as $idx) {

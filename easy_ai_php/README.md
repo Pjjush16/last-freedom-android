@@ -15,6 +15,7 @@
 
 **聊天核心**
 - SSE 流式输出、深度思考（reasoning_content）折叠展示
+- **联网搜索（免 Key）**：输入框地球图标开关，回答前先搜网页（DuckDuckGo HTML 为主、Bing 兜底），抓取前 4 条结果正文注入上下文，回复带 [n] 来源标注，消息上方展示可点击的来源卡片
 - 停止生成 / 重新生成 / 复制消息
 - 多线路自动故障转移；也可在模型选择器指定单条线路
 - **多模型并排对比**：勾选 2~3 个模型，同一问题并行提问、分栏展示
@@ -60,13 +61,15 @@
 | `prompts` | GET | 提示词列表 |
 | `prompt_save` | POST | 新建 / 更新提示词 |
 | `prompt_delete` | POST | 删除提示词 |
-| `generate` | POST | 流式生成（SSE，支持 provider 指定 + strict 单线路） |
+| `websearch` | GET | 独立网页搜索（调试用），`?q=` |
+| `generate` | POST | 流式生成（SSE，支持 provider 指定 + strict 单线路 + web 联网搜索） |
 
 ## 安全说明
 
 - API Key 只保存在服务器 `data/config.json`，前端读取时打码，永不返回明文。
 - 无登录鉴权：公网部署请自行加 Basic Auth / 访问控制，否则任何人都能消耗你的额度。
 - 分享链接是匿名只读快照，知道 token 即可访问，勿分享敏感对话。
+- 联网搜索：DuckDuckGo/Bing 为非官方接口，高频使用可能被限流；搜索与网页抓取都在服务器出网，部署机需能访问外网。
 
 ## 许可证
 

@@ -7,11 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='40' fill='%23327ac2'/></svg>">
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.9.0/styles/github-dark.min.css">
-<script src="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.9.0/highlight.min.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
-<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
 <style>
 /* ============ Open WebUI 风格暗色主题 ============ */
 :root{
@@ -447,7 +443,16 @@ body.light .mermaid-wrap{background:#fff}
 .tool-btn{width:32px;height:32px;border-radius:9px;border:none;background:transparent;color:var(--gray-500);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s,color .15s;position:relative}
 .tool-btn:hover{background:var(--hover);color:var(--gray-100)}
 .tool-btn svg.ic{width:17px;height:17px}
+.tool-btn.active{color:#7fb2e8;background:rgba(50,122,194,.16)}
+.tool-btn.active:hover{color:#a8cbef}
 .tool-btn .badge{position:absolute;top:-2px;right:-2px;background:var(--accent);color:#fff;font-size:9px;min-width:14px;height:14px;border-radius:99px;display:flex;align-items:center;justify-content:center;padding:0 3px}
+
+/* 联网搜索来源 */
+.web-sources{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:2px 0 12px}
+.ws-label{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--gray-500)}
+.ws-label svg.ic{width:13px;height:13px}
+.ws-chip{font-size:11.5px;color:var(--gray-400);border:1px solid var(--gray-750);border-radius:99px;padding:3px 10px;text-decoration:none;max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:background .15s,color .15s,border-color .15s}
+.ws-chip:hover{background:var(--hover);color:var(--gray-100);border-color:var(--gray-600)}
 .input-box{flex-direction:column;align-items:stretch;padding:8px 10px 8px 12px}
 .input-box .ib-row{display:flex;align-items:flex-end;gap:8px}
 .input-box .ib-row #input{flex:1}
@@ -556,6 +561,9 @@ body.share-mode .msg-actions{display:none !important}
             </button>
           </div>
           <div class="input-tools">
+            <button class="tool-btn" id="btnWeb" title="联网搜索：回答前先搜网页">
+              <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+            </button>
             <button class="tool-btn" id="btnPrompts" title="提示词库">
               <svg class="ic" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
             </button>
@@ -675,7 +683,8 @@ const ICONS = {
   folderPlus:'<svg class="ic" viewBox="0 0 24 24"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/><path d="M12 11v6M9 14h6"/></svg>',
   folder:'<svg class="ic" viewBox="0 0 24 24"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>',
   sun:'<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>',
-  moon:'<svg class="ic" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>'
+  moon:'<svg class="ic" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>',
+  globe:'<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>'
 };
 
 /* ==================================================================
@@ -990,35 +999,47 @@ let searchQuery='';
 let collapsedFolders=new Set(JSON.parse(localStorage.getItem('ea_folders_closed')||'[]'));
 let miniOkCb=null;
 let searchTimer=null;
+let webEnabled=localStorage.getItem('ea_web')==='1';
 
 const boxEl=$('#messages'), welcomeEl=$('#welcome'), scrollEl=$('#chatScroll');
 const inputEl=$('#input'), btnSend=$('#btnSend');
 
 /* ---------- 渲染增强：代码高亮 + Mermaid + KaTeX ---------- */
 function enhance(root){
-  // 1) 代码块：mermaid 单独处理；其余 hljs 高亮并包上带语言名+复制按钮的头
+  // 1a) mermaid 代码块 → .mermaid-wrap 容器
   root.querySelectorAll('pre').forEach(pre=>{
     const code=pre.querySelector('code');
     if(!code)return;
     const m=code.className.match(/language-([\w+#-]+)/);
-    const lang=m?m[1]:'';
-    if(lang==='mermaid'){
+    if(m&&m[1]==='mermaid'){
       const wrap=document.createElement('div');wrap.className='mermaid-wrap';
       const d=document.createElement('div');d.className='mermaid';d.textContent=code.textContent;
       wrap.appendChild(d);pre.replaceWith(wrap);
-      return;
     }
-    if(window.hljs){try{hljs.highlightElement(code)}catch(e){}}
+  });
+  // 1b) 其余代码块：包上带语言名+复制按钮的头（幂等，已包过的跳过）
+  root.querySelectorAll('pre').forEach(pre=>{
+    if(pre.closest('.code-block'))return;
+    const code=pre.querySelector('code');
+    const m=code?code.className.match(/language-([\w+#-]+)/):null;
+    const lang=m?m[1]:'code';
     const blk=document.createElement('div');blk.className='code-block';
     const head=document.createElement('div');head.className='code-head';
-    const lb=document.createElement('span');lb.className='lang';lb.textContent=lang||'code';
+    const lb=document.createElement('span');lb.className='lang';lb.textContent=lang;
     const bt=document.createElement('button');bt.innerHTML=ICONS.copy+'<span>复制</span>';
     bt.addEventListener('click',()=>{
-      if(navigator.clipboard)navigator.clipboard.writeText(code.textContent).then(()=>toast('已复制')).catch(()=>toast('复制失败'));
+      const src=(pre.querySelector('code')||pre).textContent;
+      if(navigator.clipboard)navigator.clipboard.writeText(src).then(()=>toast('已复制')).catch(()=>toast('复制失败'));
     });
     head.appendChild(lb);head.appendChild(bt);
     pre.replaceWith(blk);blk.appendChild(head);blk.appendChild(pre);
   });
+  // 1c) 高亮所有尚未高亮的代码（库延迟就绪时，二次调用在此补齐）
+  if(window.hljs){
+    root.querySelectorAll('.code-block pre code:not(.hljs)').forEach(code=>{
+      try{hljs.highlightElement(code)}catch(e){}
+    });
+  }
   // 2) Mermaid 渲染
   const mNodes=root.querySelectorAll('.mermaid:not([data-processed])');
   if(window.mermaid&&mNodes.length){
@@ -1047,6 +1068,29 @@ function initMermaid(){
       fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif'
     });
   }catch(e){}
+}
+/* 增强库延迟加载：hljs / katex / auto-render / mermaid，不阻塞首屏 */
+function loadScript(src){
+  return new Promise(res=>{
+    const s=document.createElement('script');
+    s.src=src;
+    s.onload=()=>res(true);
+    s.onerror=()=>res(false);
+    document.head.appendChild(s);
+    setTimeout(()=>res(false),20000);
+  });
+}
+async function loadLibs(){
+  const KATEX='https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/';
+  await Promise.race([
+    Promise.all([
+      loadScript('https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.9.0/highlight.min.js'),
+      loadScript(KATEX+'katex.min.js').then(ok=>ok?loadScript(KATEX+'contrib/auto-render.min.js'):false),
+      loadScript('https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js')
+    ]),
+    new Promise(r=>setTimeout(r,12000))
+  ]);
+  initMermaid();
 }
 
 /* ---------- 富文本渲染 ---------- */
@@ -1122,6 +1166,21 @@ function appendError(msg){
   scrollBottom();
   return el;
 }
+// 联网搜索来源卡片
+function renderWebSources(shellEl,results){
+  if(!results||!results.length)return;
+  const body=shellEl.querySelector('.body');
+  const box=document.createElement('div');
+  box.className='web-sources';
+  box.innerHTML='<span class="ws-label">'+ICONS.globe+'<span>搜索来源</span></span>';
+  results.slice(0,5).forEach((r,i)=>{
+    const a=document.createElement('a');
+    a.className='ws-chip';a.href=r.url;a.target='_blank';a.rel='noopener';a.title=r.url;
+    a.textContent=(i+1)+' · '+(r.title||r.url);
+    box.appendChild(a);
+  });
+  body.insertBefore(box,body.firstChild);
+}
 function scrollBottom(){scrollEl.scrollTop=scrollEl.scrollHeight}
 function showWelcome(show){
   welcomeEl.style.display=show?'flex':'none';
@@ -1162,14 +1221,15 @@ async function send(text,regen){
   body.innerHTML='<div class="think-head" style="cursor:default">正在思考<span class="think-dots"><i></i><i></i><i></i></span></div>';
 
   setStreamingUI(true);
+  $('#topStatusText').textContent=webEnabled?'正在联网搜索…':'生成中';
   aborter=new AbortController();
-  let content='',thinking='',errMsg='',thinkStart=Date.now(),thinkTimer=null,thinkBlock=null,contentStarted=false;
+  let content='',thinking='',errMsg='',thinkStart=Date.now(),thinkTimer=null,thinkBlock=null,contentStarted=false,webResults=null;
 
   try{
     const resp=await fetch(API+'?action=generate',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({messages:messages.map(m=>({role:m.role,content:m.content})),provider:activeProvider}),
+      body:JSON.stringify({messages:messages.map(m=>({role:m.role,content:m.content})),provider:activeProvider,web:webEnabled}),
       signal:aborter.signal
     });
     if(!resp.ok||!resp.body){
@@ -1193,6 +1253,7 @@ async function send(text,regen){
         if(payload==='[DONE]'){finished=true;break}
         let ev;try{ev=JSON.parse(payload)}catch(e){continue}
         if(ev.error){errMsg=ev.error;finished=true;break}
+        if(ev.web_results){webResults=ev.web_results;renderWebSources(el,webResults);continue}
         if(ev.meta){$('#topStatusText').textContent='生成中 · '+ev.model;continue}
         const d=ev.choices&&ev.choices[0]&&ev.choices[0].delta;
         if(!d)continue;
@@ -1244,6 +1305,7 @@ async function send(text,regen){
     const liveEl=body.querySelector('.markdown.live');if(liveEl)liveEl.remove();
     messages.push({role:'assistant',content,thinking});
     buildAssistantContent(el,content,thinking);
+    if(webResults)renderWebSources(el,webResults);
     saveChat();
   }else{
     el.remove();
@@ -1876,8 +1938,18 @@ $('#searchInput').addEventListener('input',e=>{
 });
 
 /* ==================================================================
- * 工具栏：导出 / 分享
+ * 工具栏：联网搜索 / 导出 / 分享
  * ================================================================== */
+function syncWebBtn(){
+  $('#btnWeb').classList.toggle('active',webEnabled);
+  $('#btnWeb').title=webEnabled?'联网搜索：开（回答前先搜网页）':'联网搜索：关';
+}
+$('#btnWeb').addEventListener('click',()=>{
+  webEnabled=!webEnabled;
+  localStorage.setItem('ea_web',webEnabled?'1':'0');
+  syncWebBtn();
+  toast(webEnabled?'联网搜索已开启':'联网搜索已关闭');
+});
 $('#btnExport').addEventListener('click',e=>{
   if(!currentId){toast('当前没有可导出的对话');return}
   const r=e.currentTarget.getBoundingClientRect();
@@ -1984,13 +2056,22 @@ document.addEventListener('keydown',e=>{
   const shareToken=new URLSearchParams(location.search).get('s');
   if(shareToken){
     applyTheme(localStorage.getItem('ea_theme')||'dark');
+    // 增强库就绪后重渲染，保证分享页代码/图表正常
+    loadLibs().then(()=>{
+      document.querySelectorAll('#messages .markdown').forEach(el=>enhance(el));
+    });
     await initShareMode(shareToken);
     return;
   }
   applyTheme(localStorage.getItem('ea_theme')||'dark');
+  // 后台加载增强库，就绪后刷新当前消息区
+  loadLibs().then(()=>{
+    document.querySelectorAll('#messages .markdown').forEach(el=>enhance(el));
+  });
   await loadConfig();
   await Promise.all([loadFolders(),loadPrompts(),loadChats()]);
   renderChatList();
+  syncWebBtn();
   showWelcome(true);
   inputEl.focus();
 })();
