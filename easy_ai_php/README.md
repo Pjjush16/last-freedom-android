@@ -10,6 +10,7 @@
 | --- | --- |
 | `index.html` | 前端，Open WebUI 风格，单文件，明暗双主题 |
 | `api.php` | 后端，配置/会话/文件夹/分享/提示词/上传 + SSE 流式代理 + 工具分发 |
+| `router.php` | PHP 内置服务器路由：封禁 /data/ 与隐藏文件（生产用 Nginx 时参见安全说明） |
 | `soundfonts/` | 47 种乐器真实采样（FluidR3 GM，约 110MB），同源加载不依赖外部 CDN |
 | `start.sh` | 启动脚本，`./start.sh [端口]`，默认 8880 |
 | `fetch_samples.sh` | 采样补全脚本（可选，采样已内置；用于重新下载/补全） |
@@ -86,7 +87,10 @@
 
 ## 安全说明
 
-- API Key 只保存在服务器 `data/config.json`，前端读取时打码，永不返回明文。
+- **API Key 加密存储**：Key 用 sodium（XSalsa20-Poly1305 认证加密）加密后写入 `data/config.json`，解密密钥在 `data/.secret`（权限 600）。前端读取一律打码，永不返回明文。
+- **数据目录封禁**：内置 `router.php` 路由，`/data/` 及一切隐藏文件一律返回 403，防止密钥/会话/上传文件被直接下载。`start.sh` 已默认启用。
+- **Nginx 生产部署务必加**：`location /data/ { deny all; }` 和 `location ~ /\. { deny all; }`。
+- **传输加密**：本页表单到后端是同源请求；公网部署请套 HTTPS（反代加证书），别裸 HTTP 传 Key。Tailscale 内网本身是加密隧道，无需额外处理。
 - 无登录鉴权：公网部署请自行加 Basic Auth / 访问控制，否则任何人都能消耗你的额度。
 - 分享链接是匿名只读快照，知道 token 即可访问，勿分享敏感对话。
 - 联网搜索：DuckDuckGo/Bing 为非官方接口，高频使用可能被限流；搜索与网页抓取都在服务器出网，部署机需能访问外网。

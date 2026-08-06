@@ -21,6 +21,7 @@ define('FOLDERS_FILE', DATA_DIR . '/folders.json');
 define('SHARES_DIR', DATA_DIR . '/shares');
 define('PROMPTS_FILE', DATA_DIR . '/prompts.json');
 define('UPLOADS_DIR', DATA_DIR . '/uploads');
+define('SECRET_FILE', DATA_DIR . '/.secret');
 
 if (!is_dir(UPLOADS_DIR)) @mkdir(UPLOADS_DIR, 0777, true);
 
@@ -134,6 +135,43 @@ function str_has($haystack, $needle) {
     return stripos($haystack, $needle) !== false;
 }
 
+/* ------------------------------------------------------------------ */
+/* API Key 静态加密（sodium secretbox，密钥存 data/.secret，权限 600）  */
+/* ------------------------------------------------------------------ */
+function get_secret_key() {
+    if (!function_exists('sodium_crypto_secretbox')) return null;
+    if (is_file(SECRET_FILE)) {
+        $k = file_get_contents(SECRET_FILE);
+        if ($k !== false && strlen($k) === SODIUM_CRYPTO_SECRETBOX_KEYBYTES) return $k;
+    }
+    $k = sodium_crypto_secretbox_keygen();
+    @file_put_contents(SECRET_FILE, $k);
+    @chmod(SECRET_FILE, 0600);
+    return $k;
+}
+function encrypt_str($plain) {
+    if ($plain === '') return '';
+    $key = get_secret_key();
+    if ($key === null) return 'plain:' . $plain; // 无 sodium 时退化为明文标记
+    $nonce = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
+    $cipher = sodium_crypto_secretbox($plain, $nonce, $key);
+    return 'enc:' . base64_encode($nonce . $cipher);
+}
+function decrypt_str($stored) {
+    if ($stored === '') return '';
+    if (strpos($stored, 'enc:') === 0) {
+        $key = get_secret_key();
+        if ($key === null) return '';
+        $raw = base64_decode(substr($stored, 4), true);
+        if ($raw === false || strlen($raw) <= SODIUM_CRYPTO_SECRETBOX_NONCEBYTES) return '';
+        $nonce = substr($raw, 0, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
+        $plain = sodium_crypto_secretbox_open(substr($raw, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES), $nonce, $key);
+        return $plain === false ? '' : $plain;
+    }
+    if (strpos($stored, 'plain:') === 0) return substr($stored, 6);
+    return $stored; // 历史明文配置，读取时透传，下次保存自动加密
+}
+
 function default_config() {
     return [
         'name'   => DEFAULT_NAME,
@@ -153,7 +191,7 @@ function load_config() {
         $p = isset($cfg['providers'][$i]) && is_array($cfg['providers'][$i]) ? $cfg['providers'][$i] : [];
         $ps[] = [
             'url'   => trim((string)($p['url'] ?? '')),
-            'key'   => trim((string)($p['key'] ?? '')),
+            'key'   => trim(decrypt_str((string)($p['key'] ?? ''))),
             'model' => trim((string)($p['model'] ?? '')),
         ];
     }
@@ -354,7 +392,7 @@ case 'config':
         }
         $new['providers'][$i] = [
             'url'   => trim((string)($p['url'] ?? '')),
-            'key'   => $key,
+            'key'   => encrypt_str($key),
             'model' => trim((string)($p['model'] ?? '')),
         ];
     }
