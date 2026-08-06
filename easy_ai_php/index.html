@@ -332,7 +332,14 @@ svg.ic{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;strok
 .modal-body textarea{min-height:96px;resize:vertical;line-height:1.6}
 .hint{font-size:11.5px;color:var(--gray-600);margin-top:6px;line-height:1.6}
 .provider-card{background:var(--gray-900);border:1px solid var(--gray-750);border-radius:13px;padding:4px 14px 12px;margin-bottom:10px}
-.provider-card .pc-title{font-size:12.5px;color:var(--gray-400);font-weight:600;padding:10px 0 2px}
+.provider-card .pc-title{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--gray-400);font-weight:600;padding:10px 0 2px}
+.pc-badge{font-size:10.5px;color:#7fb2e8;background:rgba(50,122,194,.16);border-radius:99px;padding:2px 9px;font-weight:500}
+.pc-del{margin-left:auto;width:22px;height:22px;border:none;border-radius:6px;background:transparent;color:var(--gray-500);cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;transition:background .15s,color .15s}
+.pc-del:hover{background:rgba(239,68,68,.16);color:var(--danger)}
+.conn-mode{font-size:12px;color:var(--gray-400);background:var(--gray-900);border:1px solid var(--gray-750);border-radius:10px;padding:9px 12px;margin-bottom:10px;line-height:1.6}
+.conn-mode b{color:var(--gray-100)}
+.conn-add{width:100%;padding:9px;border-radius:10px;border:1px dashed var(--gray-600);background:transparent;color:var(--gray-400);font-size:13px;cursor:pointer;transition:all .15s}
+.conn-add:hover{border-color:var(--gray-400);color:var(--gray-100);background:var(--hover)}
 .modal-foot{display:flex;justify-content:flex-end;gap:10px;padding:14px 22px 18px;border-top:1px solid var(--border-soft)}
 .btn{padding:9px 20px;border-radius:10px;border:none;font-size:13.5px;cursor:pointer;transition:filter .15s,background .15s,transform .1s}
 .btn:active{transform:scale(.97)}
@@ -632,7 +639,7 @@ body.share-mode .msg-actions{display:none !important}
       <section>
         <h3>连接 · API 线路</h3>
         <div id="providerList"></div>
-        <p class="hint">密钥只保存在服务器端，前端不会看到明文。密钥留空 = 保持原值不变。多条线路按顺序自动故障转移。</p>
+        <p class="hint">密钥加密保存在服务器端，前端不会看到明文。Key 框保持打码值不动 = 沿用原 Key；清空 = 移除。线路数量不限，点「＋ 添加线路」增加，点 ✕ 删除。多条线路按顺序自动故障转移。</p>
       </section>
     </div>
     <div class="modal-foot">
@@ -2039,21 +2046,51 @@ function syncModelBtn(){
 function openSettings(){
   $('#cfgName').value=CONFIG.name||'';
   $('#cfgPrompt').value=CONFIG.prompt||'';
+  renderProviderCards();
+  $('#setOverlay').classList.add('open');
+}
+function renderProviderCards(){
   const wrap=$('#providerList');
   wrap.innerHTML='';
-  (CONFIG.providers||[]).forEach((p,i)=>{
-    const card=document.createElement('div');
-    card.className='provider-card';
-    card.innerHTML='<div class="pc-title">线路 '+(i+1)+'</div>'
-      +'<label>API URL</label><input class="p-url" placeholder="https://api.openai.com/v1/chat/completions">'
-      +'<label>API Key</label><input class="p-key" type="password" placeholder="留空保持不变">'
-      +'<label>模型</label><input class="p-model" placeholder="gpt-4o-mini">';
-    card.querySelector('.p-url').value=p.url||'';
-    card.querySelector('.p-key').value=p.key||'';
-    card.querySelector('.p-model').value=p.model||'';
-    wrap.appendChild(card);
+  const provs=(CONFIG.providers&&CONFIG.providers.length)?CONFIG.providers:[{url:'',key:'',model:''}];
+  const serverCount=provs.filter(p=>p.key).length;
+  const mode=document.createElement('div');
+  mode.className='conn-mode';
+  if(serverCount>0){
+    mode.innerHTML='<b>服务器模式</b> · 本站已内置 '+serverCount+' 条线路的 Key，无需填写直接用；也可以在下方添加自己的线路';
+  }else{
+    mode.innerHTML='<b>用户模式</b> · 请填写你自己的 API 线路（OpenAI 兼容格式）';
+  }
+  wrap.appendChild(mode);
+  provs.forEach(p=>addProviderCard(p));
+  const add=document.createElement('button');
+  add.className='conn-add';
+  add.textContent='＋ 添加线路';
+  add.addEventListener('click',()=>{addProviderCard({url:'',key:'',model:''});renumberCards();});
+  wrap.appendChild(add);
+  renumberCards();
+}
+function addProviderCard(p){
+  const wrap=$('#providerList');
+  const addBtn=wrap.querySelector('.conn-add');
+  const card=document.createElement('div');
+  card.className='provider-card';
+  card.innerHTML='<div class="pc-title"><span class="pc-name"></span>'
+    +(p.key?'<span class="pc-badge">服务器已提供 Key</span>':'')
+    +'<button class="pc-del" title="删除此线路">✕</button></div>'
+    +'<label>API URL</label><input class="p-url" placeholder="https://api.openai.com/v1/chat/completions">'
+    +'<label>API Key</label><input class="p-key" type="password" placeholder="服务器已提供则不用填；清空此框=移除 Key">'
+    +'<label>模型</label><input class="p-model" placeholder="gpt-4o-mini">';
+  card.querySelector('.p-url').value=p.url||'';
+  card.querySelector('.p-key').value=p.key||'';
+  card.querySelector('.p-model').value=p.model||'';
+  card.querySelector('.pc-del').addEventListener('click',()=>{card.remove();renumberCards();});
+  if(addBtn)wrap.insertBefore(card,addBtn);else wrap.appendChild(card);
+}
+function renumberCards(){
+  document.querySelectorAll('#providerList .provider-card').forEach((c,i)=>{
+    c.querySelector('.pc-name').textContent='线路 '+(i+1);
   });
-  $('#setOverlay').classList.add('open');
 }
 function closeSettings(){$('#setOverlay').classList.remove('open')}
 async function saveSettings(){

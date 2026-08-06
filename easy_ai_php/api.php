@@ -106,8 +106,9 @@ function json_err($msg, $code = 400) {
 function mask_key($k) {
     if ($k === '') return '';
     $n = strlen($k);
-    $head = substr($k, 0, min(3, $n));
-    return $head . str_repeat('*', max(4, min(8, $n - 3)));
+    if ($n <= 7) return str_repeat('*', max(4, $n));
+    // 首3位+末4位：不同 Key 打码值可区分（删卡重排后仍能对上原 Key）
+    return substr($k, 0, 3) . '****' . substr($k, -4);
 }
 
 // 多字节安全截断（不强依赖 mbstring 扩展）
@@ -178,23 +179,26 @@ function default_config() {
         'prompt' => DEFAULT_PROMPT,
         'providers' => [
             ['url' => '', 'key' => '', 'model' => ''],
-            ['url' => '', 'key' => '', 'model' => ''],
-            ['url' => '', 'key' => '', 'model' => ''],
         ],
     ];
 }
 
 function load_config() {
     $cfg = array_replace_recursive(default_config(), jread(CONFIG_FILE, []));
+    $file = jread(CONFIG_FILE, []);
+    $rawProviders = (isset($file['providers']) && is_array($file['providers']))
+        ? array_values($file['providers'])
+        : $cfg['providers'];
     $ps = [];
-    for ($i = 0; $i < 3; $i++) {
-        $p = isset($cfg['providers'][$i]) && is_array($cfg['providers'][$i]) ? $cfg['providers'][$i] : [];
+    foreach ($rawProviders as $p) {
+        if (!is_array($p)) continue;
         $ps[] = [
             'url'   => trim((string)($p['url'] ?? '')),
             'key'   => trim(decrypt_str((string)($p['key'] ?? ''))),
             'model' => trim((string)($p['model'] ?? '')),
         ];
     }
+    if (!$ps) $ps = [['url' => '', 'key' => '', 'model' => '']];
     $cfg['providers'] = $ps;
     return $cfg;
 }
@@ -381,21 +385,35 @@ case 'config':
         ]);
     }
     $old = load_config();
+    // 旧 Key 池：提交的打码值能对上任意旧 Key 即复用（支持删卡后索引错位）
+    $oldKeys = [];
+    foreach ($old['providers'] as $op) {
+        if ($op['key'] !== '') $oldKeys[] = $op['key'];
+    }
     $new = default_config();
     $new['name']   = trim((string)($body['name'] ?? '')) ?: DEFAULT_NAME;
     $new['prompt'] = trim((string)($body['prompt'] ?? '')) ?: DEFAULT_PROMPT;
-    for ($i = 0; $i < 3; $i++) {
-        $p = isset($body['providers'][$i]) && is_array($body['providers'][$i]) ? $body['providers'][$i] : [];
-        $key = trim((string)($p['key'] ?? ''));
-        if ($key === '' || $key === mask_key($old['providers'][$i]['key'])) {
-            $key = $old['providers'][$i]['key'];
+    $submitted = (isset($body['providers']) && is_array($body['providers'])) ? array_values($body['providers']) : [];
+    $ps = [];
+    foreach ($submitted as $p) {
+        if (!is_array($p)) continue;
+        $url   = trim((string)($p['url'] ?? ''));
+        $model = trim((string)($p['model'] ?? ''));
+        $key   = trim((string)($p['key'] ?? ''));
+        if ($key !== '') {
+            foreach ($oldKeys as $ok) {
+                if (mask_key($ok) === $key) { $key = $ok; break; } // 未改动的打码值 → 复用服务器 Key
+            }
         }
-        $new['providers'][$i] = [
-            'url'   => trim((string)($p['url'] ?? '')),
+        if ($url === '' && $key === '' && $model === '') continue; // 跳过全空线路
+        $ps[] = [
+            'url'   => $url,
             'key'   => encrypt_str($key),
-            'model' => trim((string)($p['model'] ?? '')),
+            'model' => $model,
         ];
     }
+    if (!$ps) $ps = [['url' => '', 'key' => '', 'model' => '']];
+    $new['providers'] = $ps;
     jwrite(CONFIG_FILE, $new);
     json_out(['ok' => true]);
     break;
