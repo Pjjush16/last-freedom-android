@@ -474,6 +474,12 @@ body.light .mermaid-wrap{background:#fff}
 .bubble .bfile{display:inline-flex;align-items:center;gap:6px;margin-top:6px;padding:5px 10px;border-radius:8px;background:rgba(0,0,0,.14);font-size:12.5px;color:inherit}
 body.light .bubble .bfile{background:rgba(0,0,0,.06)}
 .bubble .bfile svg.ic{width:14px;height:14px}
+/* SVG 绘图 */
+.photo-box{max-width:100%;overflow-x:auto;margin:4px 0}
+.photo-box svg{max-width:100%;height:auto;border-radius:10px;display:block}
+.photo-fail{border:1px dashed var(--gray-600);border-radius:10px;padding:10px 12px;margin:4px 0;font-size:12.5px;color:var(--gray-500)}
+.photo-fail .pf-t{margin-bottom:6px}
+.photo-fail pre{background:var(--gray-900);border-radius:8px;padding:8px 10px;overflow-x:auto;font-size:11.5px;color:var(--gray-400);white-space:pre-wrap}
 .input-box{flex-direction:column;align-items:stretch;padding:8px 10px 8px 12px}
 .input-box .ib-row{display:flex;align-items:flex-end;gap:8px}
 .input-box .ib-row #input{flex:1}
@@ -1135,7 +1141,48 @@ function drawShape(line){var p=line.split(/\s+/),cmd=p[0];
   if(cmd==='!tree'){var cx7=+p[1]||200,cy7=+p[2]||200,s7=+p[3]||60;return'<rect x="'+(cx7-s7*.08)+'" y="'+cy7+'" width="'+s7*.16+'" height="'+s7*.4+'" fill="#8B4513"/><polygon points="'+cx7+','+(cy7-s7*.4)+' '+(cx7-s7*.5)+','+cy7+' '+(cx7+s7*.5)+','+cy7+'" fill="#27ae60"/><polygon points="'+cx7+','+(cy7-s7*.15)+' '+(cx7-s7*.4)+','+(cy7+s7*.25)+' '+(cx7+s7*.4)+','+(cy7+s7*.25)+'" fill="#2ecc71"/>'}
   if(cmd==='!house'){var cx8=+p[1]||200,cy8=+p[2]||160,s8=+p[3]||60;return'<rect x="'+(cx8-s8*.4)+'" y="'+(cy8-s8*.1)+'" width="'+s8*.8+'" height="'+s8*.6+'" fill="#e74c3c"/><polygon points="'+cx8+','+(cy8-s8*.5)+' '+(cx8-s8*.55)+','+(cy8-s8*.1)+' '+(cx8+s8*.55)+','+(cy8-s8*.1)+'" fill="#8B4513"/><rect x="'+(cx8-s8*.1)+'" y="'+(cy8+s8*.05)+'" width="'+s8*.2+'" height="'+s8*.45+'" fill="#f1c40f"/>'}
   return'';}
-function parsePhoto(code){code=code.trim().replace(/<br\s*\/?>/gi,'\n');if(/<svg[\s\S]*<\/svg>/i.test(code)){if(!code.includes('xmlns'))code=code.replace('<svg','<svg xmlns="http://www.w3.org/2000/svg"');return'<div style="max-width:100%;overflow-x:auto">'+code+'</div>'}var svg='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><rect width="400" height="300" fill="#fafafa"/>';var lines=code.split('\n');for(var i=0;i<lines.length;i++){var line=lines[i].trim();if(line&&line.startsWith('!'))svg+=drawShape(line)}svg=svg+'</svg>';return'<div style="max-width:100%;overflow-x:auto">'+svg+'</div>';}
+function parsePhoto(code){
+  code=String(code).trim().replace(/<br\s*\/?>/gi,'\n');
+  // 剥掉可能混入的 markdown 围栏
+  code=code.replace(/^```[a-z]*\s*\n?/i,'').replace(/\n?```\s*$/,'').trim();
+  // 无 svg 根：先试旧版预设指令（兼容历史消息）
+  if(!/<svg[\s>]/i.test(code)){
+    var svg='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><rect width="400" height="300" fill="#fafafa"/>';
+    var hasDsl=false;
+    var lines=code.split('\n');
+    for(var i=0;i<lines.length;i++){var line=lines[i].trim();if(line&&line.startsWith('!')){svg+=drawShape(line);hasDsl=true}}
+    if(hasDsl)return'<div class="photo-box">'+svg+'</svg></div>';
+    if(/<[a-z]/i.test(code)){
+      code='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'+code+'</svg>';
+    }else{
+      return photoFail(code);
+    }
+  }
+  var fixed=repairSvg(code);
+  if(fixed)return'<div class="photo-box">'+fixed+'</div>';
+  return photoFail(code);
+}
+// SVG 修复：严格解析失败 → HTML 宽松解析重建（自动补全未闭合标签）
+function repairSvg(code){
+  if(!/xmlns/.test(code))code=code.replace(/<svg/i,'<svg xmlns="http://www.w3.org/2000/svg"');
+  try{
+    var doc=new DOMParser().parseFromString(code,'image/svg+xml');
+    if(!doc.querySelector('parsererror')){
+      return new XMLSerializer().serializeToString(doc.documentElement);
+    }
+  }catch(e){}
+  try{
+    var doc2=new DOMParser().parseFromString(code,'text/html');
+    var el=doc2.querySelector('svg');
+    if(!el)return null;
+    el.setAttribute('xmlns','http://www.w3.org/2000/svg');
+    if(!el.getAttribute('viewBox'))el.setAttribute('viewBox','0 0 400 300');
+    return new XMLSerializer().serializeToString(el);
+  }catch(e){return null}
+}
+function photoFail(code){
+  return'<div class="photo-fail"><div class="pf-t">图片渲染失败，原始输出：</div><pre>'+esc(String(code).slice(0,600))+'</pre></div>';
+}
 
 /* ==================================================================
  * 音频块提取 & 播放器
@@ -1191,6 +1238,9 @@ let pendingAttachments=[];
 
 const boxEl=$('#messages'), welcomeEl=$('#welcome'), scrollEl=$('#chatScroll');
 const inputEl=$('#input'), btnSend=$('#btnSend');
+
+// 图片标记容错匹配：开头 【photo】/【photo，结尾 【/photo】/【/photo/】/photo/[ /photo] 等常见写法
+const PHOTO_RE=/(?:【photo】|【photo)\s*([\s\S]*?)\s*(?:【\/photo】|【\/photo|】\/photo|\[\/photo\])/gi;
 
 /* ---------- 渲染增强：代码高亮 + Mermaid + KaTeX ---------- */
 function enhance(root){
@@ -1286,9 +1336,9 @@ function renderRich(content){
   const ar=ea(content||'');
   let raw=ar.html;
   // photo 块先在原始文本上替换（此时换行还是 \n），再交给 marked，避免 <br> 破坏图形指令
-  raw=raw.replace(/【photo】\s*([\s\S]*?)\s*【\/photo】/gi,(_,c)=>'\n\n'+parsePhoto(c)+'\n\n');
+  raw=raw.replace(PHOTO_RE,(_,c)=>'\n\n'+parsePhoto(c)+'\n\n');
   let html=window.marked?marked.parse(raw):esc(raw);
-  html=html.replace(/【photo】\s*([\s\S]*?)\s*【\/photo】/gi,(_,c)=>parsePhoto(c));
+  html=html.replace(PHOTO_RE,(_,c)=>parsePhoto(c));
   ar.blocks.forEach(b=>{
     window._midi[b.id]=b.data;window._loops[b.id]=false;
     html=html.split(voiceHtml({id:b.id,label:b.label},true)).join(voiceHtml(b,false));

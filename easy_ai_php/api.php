@@ -41,10 +41,15 @@ define('AUTO_RULES', <<<'RULES'
 ## 输出规则
 
 ### 🎨 图片
-用 【photo】 和 【/photo】 包裹。
-预设图形：!heart cx cy size color | !star cx cy size color | !smile cx cy size | !sun cx cy size | !cloud cx cy size | !flower cx cy size color | !tree cx cy size | !house cx cy size
-颜色：red blue green yellow purple orange pink white black gray
-也可直接写SVG代码。
+用户要求画画/画图/画场景时，用 【photo】 开头、【/photo】 结尾，中间直接写完整 SVG 代码。
+要求：
+- 根标签固定 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">，画布 400x300
+- 自由使用 rect/circle/ellipse/line/path/polygon/polyline/text，用 <defs> 定义 linearGradient/radialGradient 渐变，用 <g> 分组
+- 按场景自由构图：先画背景（天空、地面、夜色、光源），再画远景、近景、主体；注意遮挡层次和色彩搭配
+- 需要夜晚/黄昏等氛围时用深色背景渐变，月亮星星、灯光光晕等细节自由发挥
+- SVG 必须格式规范：每个标签都要有对应的闭合标签（<circle .../> 或 <circle></circle>），属性值一律加双引号，不要输出多余的解释文字
+- 标记必须严格完整：【photo】 与 【/photo】 各占一头，不要写错括号位置
+示例结构：【photo】<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><rect width="400" height="300" fill="#0b1026"/>...</svg>【/photo】
 
 ### 🎵 音乐
 用 ```audio 代码块。每行：音名 时长(秒) [力度]
