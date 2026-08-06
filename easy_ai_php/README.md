@@ -46,6 +46,26 @@
 
 **扩展新技能**：在 api.php 的 `build_tool_defs()` 里加一条工具定义，在 `exec_tool()` 里加一个分支函数即可，前端无需改动。
 
+## 模型接入（OpenAI / Ollama / 任意兼容接口）
+
+后端说的是标准 OpenAI Chat Completions 格式，凡是兼容该格式的都能接：
+
+| 服务 | API URL | Key |
+| --- | --- | --- |
+| OpenAI | `https://api.openai.com/v1/chat/completions` | 你的 sk-xxx |
+| DeepSeek | `https://api.deepseek.com/v1/chat/completions` | 你的 Key |
+| 阿里百炼(Qwen) | `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions` | 你的 Key |
+| Moonshot | `https://api.moonshot.cn/v1/chat/completions` | 你的 Key |
+| OpenRouter | `https://openrouter.ai/api/v1/chat/completions` | 你的 Key |
+| **Ollama 本地** | `http://127.0.0.1:11434/v1/chat/completions` | **留空**（无需鉴权） |
+| LM Studio | `http://127.0.0.1:1234/v1/chat/completions` | 留空 |
+
+- Ollama 走自带的 OpenAI 兼容端点 `/v1/...`（不是 `/api/chat`），模型名填完整 tag，如 `qwen2.5:7b`、`llama3.1:8b`
+- Key 选填：留空则不带 Authorization 头（本地服务直接可用）
+- 联网搜索/看图/读文件等工具调用需要模型支持 function calling（Ollama 上如 llama3.1、qwen2.5、mistral-nemo 等）；不支持时联网搜索自动降级为预注入模式
+- 看图（read_image）需要视觉模型（OpenAI gpt-4o、Ollama 上的 llava/qwen2.5vl 等）
+- 注意：Easy AI 服务器必须能访问到模型地址——Ollama 和 Easy AI 不在同一台机器时，URL 里写 Ollama 那台的内网 IP
+
 ## 部署
 
 - 环境：PHP >= 7.4 + curl + zip 扩展（docx 解析需 zip；不强依赖 mbstring）。无框架、无数据库。

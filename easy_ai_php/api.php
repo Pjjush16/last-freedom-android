@@ -725,7 +725,7 @@ case 'generate':
 
     $valid = [];
     foreach ($cfg['providers'] as $i => $p) {
-        if ($p['url'] !== '' && $p['key'] !== '' && $p['model'] !== '') $valid[] = $i;
+        if ($p['url'] !== '' && $p['model'] !== '') $valid[] = $i; // Key 选填：Ollama 等本地服务无需鉴权
     }
     if (!$valid) json_err('尚未配置可用的 API 线路，请先在设置中填写', 400);
 
@@ -1215,15 +1215,13 @@ function stream_from_provider($provider, $messages, $sse, $tools = null, &$toolC
     $hasContent = false;
 
     $ch = curl_init();
+    $headers = ['Content-Type: application/json', 'Accept: text/event-stream'];
+    if ($provider['key'] !== '') $headers[] = 'Authorization: Bearer ' . $provider['key'];
     curl_setopt_array($ch, [
         CURLOPT_URL            => $provider['url'],
         CURLOPT_POST           => true,
         CURLOPT_POSTFIELDS     => json_encode($payload, JSON_UNESCAPED_UNICODE),
-        CURLOPT_HTTPHEADER     => [
-            'Content-Type: application/json',
-            'Authorization: Bearer ' . $provider['key'],
-            'Accept: text/event-stream',
-        ],
+        CURLOPT_HTTPHEADER     => $headers,
         CURLOPT_RETURNTRANSFER => false,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_MAXREDIRS      => 3,

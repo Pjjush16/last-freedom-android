@@ -1477,7 +1477,7 @@ async function send(text,regen){
   if(streaming)return;
   if(!text&&!atts.length)return;
   if(!text)text='请看上传的附件。';
-  const usable=(CONFIG&&CONFIG.providers||[]).filter(p=>p.url&&p.model&&p.key);
+  const usable=(CONFIG&&CONFIG.providers||[]).filter(p=>p.url&&p.model);
   if(!usable.length){toast('请先在设置中配置 API 线路');openSettings();return}
 
   showWelcome(false);
@@ -1599,7 +1599,7 @@ async function sendCompare(text){
   if(!text&&!atts.length)return;
   if(streaming)return;
   if(!text)text='请看上传的附件。';
-  const usable=(CONFIG&&CONFIG.providers||[]).filter(p=>p.url&&p.model&&p.key);
+  const usable=(CONFIG&&CONFIG.providers||[]).filter(p=>p.url&&p.model);
   if(!usable.length){toast('请先在设置中配置 API 线路');openSettings();return}
 
   showWelcome(false);
@@ -2078,8 +2078,8 @@ function addProviderCard(p){
   card.innerHTML='<div class="pc-title"><span class="pc-name"></span>'
     +(p.key?'<span class="pc-badge">服务器已提供 Key</span>':'')
     +'<button class="pc-del" title="删除此线路">✕</button></div>'
-    +'<label>API URL</label><input class="p-url" placeholder="https://api.openai.com/v1/chat/completions">'
-    +'<label>API Key</label><input class="p-key" type="password" placeholder="服务器已提供则不用填；清空此框=移除 Key">'
+    +'<label>API URL</label><input class="p-url" placeholder="OpenAI: https://api.openai.com/v1/chat/completions  |  Ollama: http://127.0.0.1:11434/v1/chat/completions">'
+    +'<label>API Key</label><input class="p-key" type="password" placeholder="选填：Ollama/本地服务可留空；服务器已提供则不用填">'
     +'<label>模型</label><input class="p-model" placeholder="gpt-4o-mini">';
   card.querySelector('.p-url').value=p.url||'';
   card.querySelector('.p-key').value=p.key||'';
@@ -2313,7 +2313,7 @@ $('#fileInput').addEventListener('change',async e=>{
   const files=Array.from(e.target.files||[]);
   e.target.value='';
   if(!files.length)return;
-  const usable=(CONFIG&&CONFIG.providers||[]).filter(p=>p.url&&p.model&&p.key);
+  const usable=(CONFIG&&CONFIG.providers||[]).filter(p=>p.url&&p.model);
   if(!usable.length){toast('请先在设置中配置 API 线路');openSettings();return}
   for(const f of files){
     if(f.size>15*1024*1024){toast('「'+f.name+'」超过 15MB，已跳过');continue}
