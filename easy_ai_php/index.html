@@ -452,6 +452,9 @@ body.light .mermaid-wrap{background:#fff}
 .tool-btn svg.ic{width:17px;height:17px}
 .tool-btn.active{color:#7fb2e8;background:rgba(50,122,194,.16)}
 .tool-btn.active:hover{color:#a8cbef}
+.tool-btn.active-toggle{color:#7fb2e8;background:rgba(50,122,194,.16)}
+.tool-btn.recording{color:#fff;background:var(--danger);animation:voicePulse 1.2s ease-in-out infinite}
+@keyframes voicePulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.5)}50%{box-shadow:0 0 0 9px rgba(239,68,68,0)}}
 .tool-btn .badge{position:absolute;top:-2px;right:-2px;background:var(--accent);color:#fff;font-size:9px;min-width:14px;height:14px;border-radius:99px;display:flex;align-items:center;justify-content:center;padding:0 3px}
 
 /* 联网搜索来源 */
@@ -459,6 +462,7 @@ body.light .mermaid-wrap{background:#fff}
 .ws-label{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--gray-500)}
 .ws-label svg.ic{width:13px;height:13px}
 .ws-chip{font-size:11.5px;color:var(--gray-400);border:1px solid var(--gray-750);border-radius:99px;padding:3px 10px;text-decoration:none;max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:background .15s,color .15s,border-color .15s}
+.rag-sources .ws-chip{color:#9fd0a8;border-color:rgba(46,204,113,.35)}
 .ws-chip:hover{background:var(--hover);color:var(--gray-100);border-color:var(--gray-600)}
 
 /* 附件栏（输入框上方） */
@@ -501,6 +505,29 @@ body.light .bubble .bfile{background:rgba(0,0,0,.06)}
 .typing i:nth-child(2){animation-delay:.15s}
 .typing i:nth-child(3){animation-delay:.3s}
 
+/* ============ 登录层 ============ */
+.login-overlay{position:fixed;top:0;left:0;right:0;bottom:0;z-index:400;background:var(--gray-850);display:none;align-items:center;justify-content:center;padding:20px}
+.login-overlay.show{display:flex}
+.login-card{width:100%;max-width:360px;background:var(--gray-900);border:1px solid var(--gray-750);border-radius:18px;padding:30px 28px;box-shadow:0 24px 80px rgba(0,0,0,.5);animation:fadeUp .4s ease both}
+.login-card .lg-logo{display:flex;justify-content:center;margin-bottom:16px}
+.login-card h2{font-size:19px;text-align:center;margin-bottom:4px}
+.login-card .lg-sub{font-size:12.5px;color:var(--gray-500);text-align:center;margin-bottom:20px}
+.login-card label{display:block;font-size:12.5px;color:var(--gray-500);margin:12px 0 5px}
+.login-card input{width:100%;padding:10px 13px;border-radius:10px;border:1px solid var(--gray-750);background:var(--gray-850);color:var(--gray-100);font-size:14px;outline:none;transition:border-color .15s}
+.login-card input:focus{border-color:var(--accent)}
+.login-card .lg-btn{width:100%;margin-top:20px;padding:11px;border:none;border-radius:10px;background:var(--accent);color:#fff;font-size:14px;font-weight:600;cursor:pointer;transition:filter .15s}
+.login-card .lg-btn:hover{filter:brightness(1.12)}
+.login-card .lg-err{color:#f87171;font-size:12.5px;text-align:center;margin-top:12px;min-height:16px}
+.user-chip{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;border-radius:9px;background:transparent;border:none;color:var(--gray-300);font-size:13px;text-align:left}
+.user-chip .ua{width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0}
+.user-chip .un{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.user-chip .lg-out{width:26px;height:26px;border:none;border-radius:7px;background:transparent;color:var(--gray-500);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .15s,color .15s}
+.user-chip .lg-out:hover{background:rgba(239,68,68,.15);color:var(--danger)}
+.user-chip .lg-out svg.ic{width:15px;height:15px}
+.pm-user-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--gray-750);border-radius:9px;margin-bottom:6px}
+.pm-user-row .un{flex:1;font-size:13px}
+.pm-user-row .ur{font-size:11px;color:var(--gray-500);border:1px solid var(--gray-700);border-radius:99px;padding:1px 8px;flex-shrink:0}
+
 /* ============ 分享只读模式 ============ */
 #shareBanner{display:none;align-items:center;gap:8px;padding:10px 18px;background:var(--gray-900);border-bottom:1px solid var(--border-soft);font-size:13px;color:var(--gray-400)}
 #shareBanner b{color:var(--gray-100);font-weight:600}
@@ -519,6 +546,19 @@ body.share-mode .msg-actions{display:none !important}
 </style>
 </head>
 <body>
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-card">
+    <div class="lg-logo"><div class="orb lg"><span class="spark"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2l1.9 5.7L19.6 9.6l-5.7 1.9L12 17.2l-1.9-5.7L4.4 9.6l5.7-1.9z"/></svg></span></div></div>
+    <h2 id="lgTitle">登录 Easy AI</h2>
+    <p class="lg-sub" id="lgSub">请输入账号和密码</p>
+    <label>用户名</label>
+    <input id="lgUser" autocomplete="username" placeholder="用户名">
+    <label>密码</label>
+    <input id="lgPass" type="password" autocomplete="current-password" placeholder="密码">
+    <button class="lg-btn" id="lgSubmit">登 录</button>
+    <div class="lg-err" id="lgErr"></div>
+  </div>
+</div>
 <div id="app">
   <!-- ======== 侧边栏 ======== -->
   <aside id="sidebar">
@@ -540,6 +580,13 @@ body.share-mode .msg-actions{display:none !important}
     </div>
     <div class="chat-list" id="chatList"></div>
     <div class="sb-foot">
+      <div class="user-chip" id="userChip">
+        <span class="ua" id="userAvatar">?</span>
+        <span class="un" id="userName">未登录</span>
+        <button class="lg-out" id="btnLogout" title="退出登录">
+          <svg class="ic" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        </button>
+      </div>
       <button class="sb-foot-btn" id="btnSettings">
         <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008.6 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 8.6a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
         设置
@@ -602,6 +649,9 @@ body.share-mode .msg-actions{display:none !important}
             <button class="tool-btn" id="btnWeb" title="联网搜索：模型按需自动搜网页">
               <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
             </button>
+            <button class="tool-btn" id="btnRag" title="知识库检索 RAG">
+              <svg class="ic" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><path d="M9 7h6M9 11h6"/></svg>
+            </button>
             <button class="tool-btn" id="btnPrompts" title="提示词库">
               <svg class="ic" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
             </button>
@@ -610,6 +660,12 @@ body.share-mode .msg-actions{display:none !important}
             </button>
             <button class="tool-btn" id="btnShare" title="生成分享链接">
               <svg class="ic" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51l6.83 3.98M15.41 6.51l-6.82 3.98"/></svg>
+            </button>
+            <button class="tool-btn" id="btnVoice" title="语音输入">
+              <svg class="ic" viewBox="0 0 24 24"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg>
+            </button>
+            <button class="tool-btn" id="btnAutoRead" title="自动朗读回复">
+              <svg class="ic" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 010 7.07M19.07 4.93a10 10 0 010 14.14"/></svg>
             </button>
             <span class="foot-inline"></span>
           </div>
@@ -640,6 +696,37 @@ body.share-mode .msg-actions{display:none !important}
         <h3>连接 · API 线路</h3>
         <div id="providerList"></div>
         <p class="hint">密钥加密保存在服务器端，前端不会看到明文。Key 框保持打码值不动 = 沿用原 Key；清空 = 移除。线路数量不限，点「＋ 添加线路」增加，点 ✕ 删除。多条线路按顺序自动故障转移。</p>
+      </section>
+      <section>
+        <h3>知识库 · RAG</h3>
+        <label>嵌入模型 embed_model（必填才启用 RAG）</label>
+        <input id="cfgEmbedModel" placeholder="OpenAI: text-embedding-3-small | Ollama: nomic-embed-text">
+        <label>嵌入端点 embed_url（留空则自动取第一条线路推导）</label>
+        <input id="cfgEmbedUrl" placeholder="https://api.openai.com/v1/embeddings">
+        <p class="hint">知识库文档会被切块并向量化存储；对话开启 RAG 后自动检索相关片段注入上下文。</p>
+        <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+          <input id="kbTitle" placeholder="文档标题" style="flex:1">
+          <button class="btn btn-ghost" id="kbPickFile" style="padding:8px 12px">导入文件</button>
+          <input type="file" id="kbFileInput" accept=".txt,.md,.csv,.json,.log" style="display:none">
+        </div>
+        <textarea id="kbContent" placeholder="粘贴或导入文档正文…（点「添加到知识库」完成向量化）" style="margin-top:8px"></textarea>
+        <button class="btn btn-primary" id="kbAdd" style="margin-top:8px;width:100%">添加到知识库（向量化）</button>
+        <div id="kbList" style="margin-top:12px"></div>
+      </section>
+      <section id="userMgmtSec" style="display:none">
+        <h3>用户管理（管理员）</h3>
+        <div id="userList"></div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <input id="nuName" placeholder="新用户名" style="flex:1">
+          <input id="nuPass" type="password" placeholder="密码(≥4位)" style="flex:1">
+        </div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <select id="nuRole" style="flex:1;padding:9px 12px;border-radius:10px;border:1px solid var(--gray-750);background:var(--gray-900);color:var(--gray-100);font-size:13px">
+            <option value="user">普通用户</option>
+            <option value="admin">管理员</option>
+          </select>
+          <button class="btn btn-primary" id="nuAdd">添加用户</button>
+        </div>
       </section>
     </div>
     <div class="modal-foot">
@@ -709,6 +796,7 @@ const ICONS = {
   trash:'<svg class="ic" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14"/></svg>',
   copy:'<svg class="ic" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>',
   regen:'<svg class="ic" viewBox="0 0 24 24"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>',
+  speak:'<svg class="ic" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 010 7.07M19.07 4.93a10 10 0 010 14.14"/></svg>',
   stop:'<svg class="ic" viewBox="0 0 24 24" style="fill:currentColor;stroke:none"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
   send:'<svg class="ic" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
   spark:'<svg class="ic" viewBox="0 0 24 24"><path d="M12 2l1.9 5.7L19.6 9.6l-5.7 1.9L12 17.2l-1.9-5.7L4.4 9.6l5.7-1.9z"/></svg>',
@@ -1241,6 +1329,7 @@ let collapsedFolders=new Set(JSON.parse(localStorage.getItem('ea_folders_closed'
 let miniOkCb=null;
 let searchTimer=null;
 let webEnabled=localStorage.getItem('ea_web')==='1';
+let ragEnabled=localStorage.getItem('ea_rag')==='1';
 let pendingAttachments=[];
 
 const boxEl=$('#messages'), welcomeEl=$('#welcome'), scrollEl=$('#chatScroll');
@@ -1338,6 +1427,54 @@ async function loadLibs(){
   initMermaid();
 }
 
+/* ---------- 浏览器端文档解析：pdf.js 读 PDF、Tesseract OCR 识图 ---------- */
+let _pdfjsReady=null,_tessReady=null;
+function loadPdfJs(){
+  if(_pdfjsReady)return _pdfjsReady;
+  _pdfjsReady=(async()=>{
+    const ok=await loadScript('https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js');
+    if(ok&&window.pdfjsLib){
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+      return true;
+    }
+    return false;
+  })();
+  return _pdfjsReady;
+}
+function loadTesseract(){
+  if(_tessReady)return _tessReady;
+  _tessReady=loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+  return _tessReady;
+}
+// 客户端抽取 PDF 全文（不依赖服务器 pdftotext）
+async function extractPdfText(file){
+  try{
+    const ok=await loadPdfJs();
+    if(!ok||!window.pdfjsLib)return null;
+    const buf=await file.arrayBuffer();
+    const doc=await window.pdfjsLib.getDocument({data:buf}).promise;
+    let out='',pages=Math.min(doc.numPages,40);
+    for(let i=1;i<=pages;i++){
+      const pg=await doc.getPage(i);
+      const tc=await pg.getTextContent();
+      out+=tc.items.map(it=>it.str).join(' ')+'\n\n';
+    }
+    out=out.replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim();
+    return out||null;
+  }catch(e){console.error('PDF解析失败',e);return null}
+}
+// 客户端 OCR 识图（中英）
+async function extractImageOcr(file){
+  try{
+    const ok=await loadTesseract();
+    if(!ok||!window.Tesseract)return null;
+    const res=await window.Tesseract.recognize(file,'chi_sim+eng',{
+      logger:m=>{if(m.status==='recognizing text'&&_ocrChipEl){_ocrChipEl.textContent='识别中 '+Math.round(m.progress*100)+'%'}}
+    });
+    return (res.data.text||'').trim()||null;
+  }catch(e){console.error('OCR失败',e);return null}
+}
+
 /* ---------- 富文本渲染 ---------- */
 function renderRich(content){
   const ar=ea(content||'');
@@ -1368,12 +1505,13 @@ function makeThinking(thinking,open,liveSecs){
 function makeActions(content){
   const bar=document.createElement('div');
   bar.className='msg-actions';
-  bar.innerHTML='<button title="复制">'+ICONS.copy+'</button><button title="重新生成">'+ICONS.regen+'</button>';
+  bar.innerHTML='<button title="复制">'+ICONS.copy+'</button><button title="朗读">'+ICONS.speak+'</button><button title="重新生成">'+ICONS.regen+'</button>';
   bar.children[0].addEventListener('click',()=>{
     const txt=(navigator.clipboard&&navigator.clipboard.writeText)?navigator.clipboard.writeText(content):Promise.reject();
     txt.then(()=>toast('已复制')).catch(()=>toast('复制失败'));
   });
-  bar.children[1].addEventListener('click',()=>regenerate());
+  bar.children[1].addEventListener('click',()=>speak(content));
+  bar.children[2].addEventListener('click',()=>regenerate());
   return bar;
 }
 function appendUser(text,atts){
@@ -1449,6 +1587,23 @@ function renderWebSources(shellEl,results){
   });
   body.insertBefore(box,body.firstChild);
 }
+function renderRagSources(shellEl,sources){
+  if(!sources||!sources.length)return;
+  const body=shellEl.querySelector('.body');
+  const old=body.querySelector('.rag-sources');
+  if(old)old.remove();
+  const box=document.createElement('div');
+  box.className='web-sources rag-sources';
+  box.innerHTML='<span class="ws-label">'+ICONS.book+'<span>知识库来源</span></span>';
+  sources.slice(0,6).forEach((s,i)=>{
+    const chip=document.createElement('span');
+    chip.className='ws-chip';
+    chip.title=(s.title||'')+' · 相关度 '+s.score;
+    chip.textContent=(i+1)+' · '+(s.title||'知识库')+' ('+s.score+')';
+    box.appendChild(chip);
+  });
+  body.insertBefore(box,body.firstChild);
+}
 function scrollBottom(){scrollEl.scrollTop=scrollEl.scrollHeight}
 function showWelcome(show){
   welcomeEl.style.display=show?'flex':'none';
@@ -1479,12 +1634,15 @@ async function send(text,regen){
   if(!text)text='请看上传的附件。';
   const usable=(CONFIG&&CONFIG.providers||[]).filter(p=>p.url&&p.model);
   if(!usable.length){toast('请先在设置中配置 API 线路');openSettings();return}
+  stopSpeak();stopVoice();
 
   showWelcome(false);
   if(!regen){
     let content=text;
     atts.forEach(a=>{content+='\n[[att:'+a.id+':'+String(a.name).replace(/[:\]\[\n]/g,'_')+':'+(a.mime||'')+']]'});
-    messages.push({role:'user',content});
+    let clientCtx='';
+    atts.forEach(a=>{if(a._clientText)clientCtx+='\n\n[附件文件 '+a.name+' 的浏览器端提取文本]\n'+String(a._clientText).slice(0,12000)});
+    messages.push({role:'user',content,_clientCtx:clientCtx});
     appendUser(text,atts);
   }
   inputEl.value='';autoResize();updateInputUI();
@@ -1496,13 +1654,13 @@ async function send(text,regen){
 
   setStreamingUI(true);
   aborter=new AbortController();
-  let content='',thinking='',errMsg='',thinkStart=Date.now(),thinkTimer=null,thinkBlock=null,contentStarted=false,webResults=null;
+  let content='',thinking='',errMsg='',thinkStart=Date.now(),thinkTimer=null,thinkBlock=null,contentStarted=false,webResults=null,ragSources=null;
 
   try{
     const resp=await fetch(API+'?action=generate',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({messages:messages.map(m=>({role:m.role,content:stripAtt(m.content)})),provider:activeProvider,web:webEnabled,attachments:atts.map(a=>({id:a.id}))}),
+      body:JSON.stringify({messages:messages.map(m=>({role:m.role,content:stripAtt(m.content)+(m._clientCtx||'')})),provider:activeProvider,web:webEnabled,rag:ragEnabled,attachments:atts.filter(a=>!a._clientText).map(a=>({id:a.id}))}),
       signal:aborter.signal
     });
     if(!resp.ok||!resp.body){
@@ -1527,6 +1685,7 @@ async function send(text,regen){
         let ev;try{ev=JSON.parse(payload)}catch(e){continue}
         if(ev.error){errMsg=ev.error;finished=true;break}
         if(ev.web_results){webResults=ev.web_results;renderWebSources(el,webResults);$('#topStatusText').textContent='已联网搜索 · '+webResults.length+' 条来源';continue}
+        if(ev.rag_sources){ragSources=ev.rag_sources;renderRagSources(el,ragSources);continue}
         if(ev.meta){$('#topStatusText').textContent=(webResults?'已联网搜索 · '+webResults.length+' 条来源 · ':'生成中 · ')+ev.model;continue}
         const d=ev.choices&&ev.choices[0]&&ev.choices[0].delta;
         if(!d)continue;
@@ -1580,6 +1739,7 @@ async function send(text,regen){
     buildAssistantContent(el,content,thinking);
     if(webResults)renderWebSources(el,webResults);
     saveChat();
+    if(autoRead)speak(content);
   }else{
     el.remove();
     if(!regen){/* 保留用户消息 */}
@@ -1601,11 +1761,14 @@ async function sendCompare(text){
   if(!text)text='请看上传的附件。';
   const usable=(CONFIG&&CONFIG.providers||[]).filter(p=>p.url&&p.model);
   if(!usable.length){toast('请先在设置中配置 API 线路');openSettings();return}
+  stopSpeak();stopVoice();
 
   showWelcome(false);
   let content=text;
   atts.forEach(a=>{content+='\n[[att:'+a.id+':'+String(a.name).replace(/[:\]\[\n]/g,'_')+':'+(a.mime||'')+']]'});
-  messages.push({role:'user',content});
+  let clientCtx='';
+  atts.forEach(a=>{if(a._clientText)clientCtx+='\n\n[附件文件 '+a.name+' 的浏览器端提取文本]\n'+String(a._clientText).slice(0,12000)});
+  messages.push({role:'user',content,_clientCtx:clientCtx});
   appendUser(text,atts);
   inputEl.value='';autoResize();updateInputUI();
   pendingAttachments=[];renderAttachBar();
@@ -1645,7 +1808,7 @@ async function streamColumn(c){
       break;
     }
   }
-  const payload={messages:messages.map(m=>({role:m.role,content:stripAtt(m.content)})),provider:c.i,strict:true,attachments:_attIds};
+  const payload={messages:messages.map(m=>({role:m.role,content:stripAtt(m.content)+(m._clientCtx||'')})),provider:c.i,strict:true,attachments:_attIds};
   let thinkBlock=null,contentStarted=false,errMsg='';
   try{
     const resp=await fetch(API+'?action=generate',{
@@ -2046,7 +2209,11 @@ function syncModelBtn(){
 function openSettings(){
   $('#cfgName').value=CONFIG.name||'';
   $('#cfgPrompt').value=CONFIG.prompt||'';
+  $('#cfgEmbedModel').value=CONFIG.embed_model||'';
+  $('#cfgEmbedUrl').value=CONFIG.embed_url||'';
   renderProviderCards();
+  loadKbList();
+  if(AUTH&&AUTH.role==='admin')renderUserManager();
   $('#setOverlay').classList.add('open');
 }
 function renderProviderCards(){
@@ -2103,7 +2270,7 @@ async function saveSettings(){
     const resp=await fetch(API+'?action=config',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({name:$('#cfgName').value.trim(),prompt:$('#cfgPrompt').value.trim(),providers})
+      body:JSON.stringify({name:$('#cfgName').value.trim(),prompt:$('#cfgPrompt').value.trim(),embed_model:$('#cfgEmbedModel').value.trim(),embed_url:$('#cfgEmbedUrl').value.trim(),providers})
     });
     const d=await resp.json();
     if(d.ok){
@@ -2258,6 +2425,7 @@ $('#searchInput').addEventListener('input',e=>{
 /* ==================================================================
  * 附件上传（图片/文件 → read_image / read_file 工具）
  * ================================================================== */
+let _ocrChipEl=null;
 function fmtSize(n){
   if(n<1024)return n+'B';
   if(n<1048576)return(n/1024).toFixed(1)+'KB';
@@ -2281,7 +2449,13 @@ function renderAttachBar(){
     const meta=document.createElement('div');meta.className='fmeta';
     meta.innerHTML='<span class="fname"></span><span class="fsize"></span>';
     meta.querySelector('.fname').textContent=a.name||'文件';
-    meta.querySelector('.fsize').textContent=a.uploading?'上传中…':(a.error?'上传失败':fmtSize(a.size||0));
+    const fsizeEl=meta.querySelector('.fsize');
+    if(a.uploading)fsizeEl.textContent='上传中…';
+    else if(a.error)fsizeEl.textContent='上传失败';
+    else if(a._parsing)fsizeEl.textContent='浏览器解析中…';
+    else if(a._clientText)fsizeEl.textContent='已提取 '+a._clientText.length+' 字';
+    else fsizeEl.textContent=fmtSize(a.size||0);
+    if((a.mime||'').startsWith('image/'))_ocrChipEl=fsizeEl;
     chip.appendChild(meta);
     const rm=document.createElement('button');rm.className='frm';rm.title='移除';rm.textContent='✕';
     rm.addEventListener('click',()=>{pendingAttachments.splice(i,1);renderAttachBar();});
@@ -2290,7 +2464,7 @@ function renderAttachBar(){
   });
 }
 async function uploadOne(file){
-  const item={name:file.name,size:file.size,mime:file.type||'',uploading:true};
+  const item={name:file.name,size:file.size,mime:file.type||'',uploading:true,_file:file,_clientText:null,_parsing:false};
   pendingAttachments.push(item);
   renderAttachBar();
   try{
@@ -2307,6 +2481,21 @@ async function uploadOne(file){
     toast('上传失败：'+e.message);
   }
   renderAttachBar();
+  // 后台做浏览器端解析：PDF 抽全文 / 图片 OCR，结果随消息一并发给模型
+  clientParse(item);
+}
+async function clientParse(item){
+  const isPdf=(item.mime||'').includes('pdf')||/\.pdf$/i.test(item.name||'');
+  const isImg=(item.mime||'').startsWith('image/');
+  if(!isPdf&&!isImg)return;
+  item._parsing=true;renderAttachBar();
+  let txt=null;
+  if(isPdf){txt=await extractPdfText(item._file)}
+  else if(isImg){txt=await extractImageOcr(item._file)}
+  item._parsing=false;
+  item._clientText=txt;
+  renderAttachBar();
+  if(txt)toast('「'+item.name+'」已在浏览器端提取文本（'+txt.length+' 字）');
 }
 $('#btnAttach').addEventListener('click',()=>$('#fileInput').click());
 $('#fileInput').addEventListener('change',async e=>{
@@ -2315,6 +2504,7 @@ $('#fileInput').addEventListener('change',async e=>{
   if(!files.length)return;
   const usable=(CONFIG&&CONFIG.providers||[]).filter(p=>p.url&&p.model);
   if(!usable.length){toast('请先在设置中配置 API 线路');openSettings();return}
+  stopSpeak();stopVoice();
   for(const f of files){
     if(f.size>15*1024*1024){toast('「'+f.name+'」超过 15MB，已跳过');continue}
     await uploadOne(f);
@@ -2330,6 +2520,78 @@ document.addEventListener('drop',async e=>{
 });
 
 /* ==================================================================
+ * 语音输入（Web Speech API）+ 朗读（speechSynthesis）
+ * ================================================================== */
+let voiceRec=null,voiceOn=false,autoRead=localStorage.getItem('ea_autoread')==='1';
+const SR_IMPL=window.SpeechRecognition||window.webkitSpeechRecognition;
+function syncAutoReadBtn(){
+  $('#btnAutoRead').classList.toggle('active-toggle',autoRead);
+  $('#btnAutoRead').title=autoRead?'自动朗读：开（点击关闭）':'自动朗读：关（点击开启）';
+}
+$('#btnAutoRead').addEventListener('click',()=>{
+  autoRead=!autoRead;
+  localStorage.setItem('ea_autoread',autoRead?'1':'0');
+  syncAutoReadBtn();
+  if(!autoRead)stopSpeak();
+  toast(autoRead?'自动朗读已开启':'自动朗读已关闭');
+});
+$('#btnVoice').addEventListener('click',()=>{
+  if(!SR_IMPL){toast('此浏览器不支持语音识别，请用 Chrome/Edge');return}
+  if(voiceOn){stopVoice();return}
+  try{
+    voiceRec=new SR_IMPL();
+    voiceRec.lang='zh-CN';
+    voiceRec.interimResults=true;
+    voiceRec.continuous=true;
+    const baseText=inputEl.value.trim();
+    voiceRec.onresult=e=>{
+      let t='';
+      for(let i=0;i<e.results.length;i++)t+=e.results[i][0].transcript;
+      inputEl.value=(baseText?baseText+' ':'')+t;
+      autoResize();updateInputUI();
+    };
+    voiceRec.onerror=e=>{
+      if(e.error==='not-allowed')toast('请允许麦克风权限');
+      else if(e.error!=='aborted')toast('语音识别错误：'+e.error);
+      stopVoice();
+    };
+    voiceRec.onend=()=>{if(voiceOn){try{voiceRec.start()}catch(e){stopVoice()}}};
+    voiceRec.start();
+    voiceOn=true;
+    $('#btnVoice').classList.add('recording');
+    $('#btnVoice').title='聆听中…点击停止';
+    toast('🎙️ 正在聆听…');
+    inputEl.focus();
+  }catch(e){toast('语音识别启动失败')}
+});
+function stopVoice(){
+  voiceOn=false;
+  if(voiceRec){try{voiceRec.stop()}catch(e){}}
+  $('#btnVoice').classList.remove('recording');
+  $('#btnVoice').title='语音输入';
+}
+function speak(text){
+  if(!('speechSynthesis' in window)){toast('此浏览器不支持语音合成');return}
+  stopSpeak();
+  // 剥离 markdown/代码/绘图标记，只读正文
+  const plain=String(text)
+    .replace(/```[\s\S]*?```/g,' （代码省略） ')
+    .replace(/【photo】[\s\S]*?(?:【\/photo】|】\/photo)/g,' （图片省略） ')
+    .replace(/\$\$[\s\S]*?\$\$/g,' （公式省略） ')
+    .replace(/[#*`>\[\]()!|_~-]/g,' ')
+    .replace(/\s+/g,' ').trim();
+  if(!plain)return;
+  const u=new SpeechSynthesisUtterance(plain);
+  u.lang='zh-CN';u.rate=1.05;
+  const voices=speechSynthesis.getVoices();
+  const zh=voices.find(v=>v.lang&&v.lang.toLowerCase().startsWith('zh'));
+  if(zh)u.voice=zh;
+  speechSynthesis.speak(u);
+}
+function stopSpeak(){if('speechSynthesis' in window)speechSynthesis.cancel()}
+if('speechSynthesis' in window){speechSynthesis.getVoices();speechSynthesis.onvoiceschanged=()=>speechSynthesis.getVoices()}
+
+/* ==================================================================
  * 工具栏：联网搜索 / 导出 / 分享
  * ================================================================== */
 function syncWebBtn(){
@@ -2341,6 +2603,116 @@ $('#btnWeb').addEventListener('click',()=>{
   localStorage.setItem('ea_web',webEnabled?'1':'0');
   syncWebBtn();
   toast(webEnabled?'联网搜索已开启 · 模型按需自动搜索':'联网搜索已关闭');
+});
+function syncRagBtn(){
+  $('#btnRag').classList.toggle('active',ragEnabled);
+  $('#btnRag').title=ragEnabled?'知识库检索 RAG：开':'知识库检索 RAG：关';
+}
+$('#btnRag').addEventListener('click',()=>{
+  ragEnabled=!ragEnabled;
+  localStorage.setItem('ea_rag',ragEnabled?'1':'0');
+  syncRagBtn();
+  toast(ragEnabled?'RAG 已开启 · 将检索知识库':'RAG 已关闭');
+});
+
+/* ---------- 知识库（RAG）管理 ---------- */
+async function loadKbList(){
+  try{
+    const r=await fetch(API+'?action=kb_list');
+    const d=await r.json();
+    renderKbList(d.docs||[],d.embed_ready);
+  }catch(e){}
+}
+function renderKbList(docs,embedReady){
+  const box=$('#kbList');
+  if(!box)return;
+  box.innerHTML='';
+  if(!embedReady){
+    box.innerHTML='<p class="hint" style="color:var(--danger)">尚未配置 embed_model，知识库暂不可用。请先在上方填写嵌入模型。</p>';
+    return;
+  }
+  if(!docs.length){box.innerHTML='<p class="hint">知识库为空，先在上方添加文档。</p>';return}
+  docs.forEach(d=>{
+    const row=document.createElement('div');
+    row.style.cssText='display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--gray-750);border-radius:9px;margin-bottom:6px';
+    row.innerHTML='<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px"></span><span style="font-size:11px;color:var(--gray-500)"></span>';
+    row.children[0].textContent=d.title;
+    row.children[1].textContent=d.chunks+' 块 · '+d.chars+' 字';
+    const del=document.createElement('button');
+    del.className='pc-del';del.title='删除';del.textContent='✕';
+    del.addEventListener('click',async()=>{
+      await fetch(API+'?action=kb_delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:d.id})});
+      loadKbList();toast('已删除「'+d.title+'」');
+    });
+    row.appendChild(del);
+    box.appendChild(row);
+  });
+}
+$('#kbPickFile').addEventListener('click',()=>$('#kbFileInput').click());
+$('#kbFileInput').addEventListener('change',async e=>{
+  const f=e.target.files[0];
+  if(!f)return;
+  e.target.value='';
+  const txt=await f.text();
+  $('#kbContent').value=txt;
+  if(!$('#kbTitle').value.trim())$('#kbTitle').value=f.name;
+});
+$('#kbAdd').addEventListener('click',async()=>{
+  const title=$('#kbTitle').value.trim();
+  const content=$('#kbContent').value;
+  if(!title||!content.trim()){toast('请填写标题和内容');return}
+  $('#kbAdd').textContent='向量化中…';
+  $('#kbAdd').disabled=true;
+  try{
+    const r=await fetch(API+'?action=kb_add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,content})});
+    const d=await r.json();
+    if(!d.ok&&!d.id){toast(d.error||'添加失败');return}
+    toast('已入库：'+d.chunks+' 个片段');
+    $('#kbTitle').value='';$('#kbContent').value='';
+    loadKbList();
+  }catch(e){toast('添加失败：'+e.message)}
+  finally{$('#kbAdd').textContent='添加到知识库（向量化）';$('#kbAdd').disabled=false}
+});
+
+/* ---------- 用户管理（管理员） ---------- */
+async function renderUserManager(){
+  const sec=$('#userMgmtSec');
+  if(!sec)return;
+  sec.style.display='block';
+  try{
+    const r=await fetch(API+'?action=users');
+    const d=await r.json();
+    const box=$('#userList');
+    box.innerHTML='';
+    (d.users||[]).forEach(u=>{
+      const row=document.createElement('div');
+      row.className='pm-user-row';
+      row.innerHTML='<span class="un"></span><span class="ur"></span>';
+      row.children[0].textContent=u.username+(u.username===AUTH.username?'（我）':'');
+      row.children[1].textContent=u.role==='admin'?'管理员':'用户';
+      if(u.username!==AUTH.username){
+        const del=document.createElement('button');
+        del.className='pc-del';del.title='删除用户';del.textContent='✕';
+        del.addEventListener('click',async()=>{
+          await fetch(API+'?action=user_delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u.username})});
+          toast('已删除用户 '+u.username);
+          renderUserManager();
+        });
+        row.appendChild(del);
+      }
+      box.appendChild(row);
+    });
+  }catch(e){}
+}
+$('#nuAdd').addEventListener('click',async()=>{
+  const username=$('#nuName').value.trim(),password=$('#nuPass').value,role=$('#nuRole').value;
+  if(!username||password.length<4){toast('用户名不能为空，密码至少 4 位');return}
+  try{
+    const r=await fetch(API+'?action=user_add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password,role})});
+    const d=await r.json();
+    if(d.ok){toast('已添加用户 '+username);$('#nuName').value='';$('#nuPass').value='';renderUserManager();}
+    else toast(d.error||'添加失败');
+  }catch(e){toast('添加失败：'+e.message)}
 });
 $('#btnExport').addEventListener('click',e=>{
   if(!currentId){toast('当前没有可导出的对话');return}
@@ -2444,11 +2816,50 @@ document.addEventListener('keydown',e=>{
 /* ==================================================================
  * 启动
  * ================================================================== */
-(async function init(){
+let AUTH=null;
+let setupMode=false;
+function showLogin(setup){
+  setupMode=setup;
+  $('#lgTitle').textContent=setup?'创建管理员账号':'登录 Easy AI';
+  $('#lgSub').textContent=setup?'首次使用，请设置管理员用户名和密码':'请输入账号和密码';
+  $('#lgSubmit').textContent=setup?'创建并进入':'登 录';
+  $('#loginOverlay').classList.add('show');
+  setTimeout(()=>$('#lgUser').focus(),100);
+}
+async function doLogin(){
+  const u=$('#lgUser').value.trim(),p=$('#lgPass').value;
+  if(!u||!p){$('#lgErr').textContent='请输入用户名和密码';return}
+  $('#lgErr').textContent='';
+  $('#lgSubmit').disabled=true;
+  try{
+    const r=await fetch(API+'?action='+(setupMode?'setup':'login'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});
+    const d=await r.json();
+    if(d.ok){
+      AUTH={username:d.username,role:d.role};
+      updateUserChip();
+      $('#loginOverlay').classList.remove('show');
+      $('#lgPass').value='';
+      await initApp();
+    }else{$('#lgErr').textContent=d.error||'登录失败'}
+  }catch(e){$('#lgErr').textContent='网络错误'}
+  finally{$('#lgSubmit').disabled=false}
+}
+function updateUserChip(){
+  if(!AUTH)return;
+  $('#userName').textContent=AUTH.username+(AUTH.role==='admin'?' · 管理员':'');
+  $('#userAvatar').textContent=(AUTH.username[0]||'?').toUpperCase();
+}
+$('#lgSubmit').addEventListener('click',doLogin);
+$('#lgPass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
+$('#btnLogout').addEventListener('click',async()=>{
+  try{await fetch(API+'?action=logout',{method:'POST'})}catch(e){}
+  location.reload();
+});
+
+async function initApp(){
   const shareToken=new URLSearchParams(location.search).get('s');
   if(shareToken){
     applyTheme(localStorage.getItem('ea_theme')||'dark');
-    // 增强库就绪后重渲染，保证分享页代码/图表正常
     loadLibs().then(()=>{
       document.querySelectorAll('#messages .markdown').forEach(el=>enhance(el));
     });
@@ -2456,7 +2867,6 @@ document.addEventListener('keydown',e=>{
     return;
   }
   applyTheme(localStorage.getItem('ea_theme')||'dark');
-  // 后台加载增强库，就绪后刷新当前消息区
   loadLibs().then(()=>{
     document.querySelectorAll('#messages .markdown').forEach(el=>enhance(el));
   });
@@ -2464,8 +2874,44 @@ document.addEventListener('keydown',e=>{
   await Promise.all([loadFolders(),loadPrompts(),loadChats()]);
   renderChatList();
   syncWebBtn();
+  syncRagBtn();
+  syncAutoReadBtn();
+  if(AUTH&&AUTH.role==='admin')renderUserManager();
   showWelcome(true);
   inputEl.focus();
+}
+
+// 全局 401 拦截：会话过期自动弹回登录
+const _origFetch=window.fetch;
+window.fetch=async function(...args){
+  const resp=await _origFetch.apply(this,args);
+  if(resp.status===401&&AUTH){
+    try{
+      const j=await resp.clone().json();
+      if(j.need_login){AUTH=null;showLogin(false);toast('登录已过期，请重新登录')}
+    }catch(e){}
+  }
+  return resp;
+};
+
+(async function boot(){
+  const shareToken=new URLSearchParams(location.search).get('s');
+  if(shareToken){await initApp();return}
+  try{
+    const r=await fetch(API+'?action=me');
+    const d=await r.json();
+    if(d.logged_in){
+      AUTH={username:d.username,role:d.role};
+      updateUserChip();
+      await initApp();
+    }else{
+      applyTheme(localStorage.getItem('ea_theme')||'dark');
+      showLogin(!d.has_users);
+    }
+  }catch(e){
+    applyTheme(localStorage.getItem('ea_theme')||'dark');
+    showLogin(false);
+  }
 })();
 </script>
 </body>

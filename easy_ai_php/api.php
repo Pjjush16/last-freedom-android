@@ -22,6 +22,8 @@ define('SHARES_DIR', DATA_DIR . '/shares');
 define('PROMPTS_FILE', DATA_DIR . '/prompts.json');
 define('UPLOADS_DIR', DATA_DIR . '/uploads');
 define('SECRET_FILE', DATA_DIR . '/.secret');
+define('KB_FILE', DATA_DIR . '/kb.json');
+define('USERS_FILE', DATA_DIR . '/users.json');
 
 if (!is_dir(UPLOADS_DIR)) @mkdir(UPLOADS_DIR, 0777, true);
 
@@ -177,6 +179,8 @@ function default_config() {
     return [
         'name'   => DEFAULT_NAME,
         'prompt' => DEFAULT_PROMPT,
+        'embed_model' => '',
+        'embed_url' => '',
         'providers' => [
             ['url' => '', 'key' => '', 'model' => ''],
         ],
@@ -200,6 +204,8 @@ function load_config() {
     }
     if (!$ps) $ps = [['url' => '', 'key' => '', 'model' => '']];
     $cfg['providers'] = $ps;
+    $cfg['embed_model'] = trim((string)($file['embed_model'] ?? ''));
+    $cfg['embed_url'] = trim((string)($file['embed_url'] ?? ''));
     return $cfg;
 }
 
@@ -359,6 +365,35 @@ function chat_meta($c) {
 /* 路由                                                                */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* 多用户：会话 + 鉴权                                                  */
+/* ------------------------------------------------------------------ */
+session_name('easy_ai_sess');
+session_set_cookie_params(['httponly' => true, 'samesite' => 'Lax', 'path' => '/']);
+session_start();
+
+function load_users() { return jread(USERS_FILE, []); }
+function save_users($u) { jwrite(USERS_FILE, $u); }
+function current_user() {
+    if (session_status() !== PHP_SESSION_ACTIVE) return null;
+    return isset($_SESSION['ea_user']) ? (string)$_SESSION['ea_user'] : null;
+}
+function user_role($name) {
+    foreach (load_users() as $u) if ($u['username'] === $name) return $u['role'] ?? 'user';
+    return null;
+}
+function is_admin() {
+    $u = current_user();
+    if ($u === null) return false;
+    return user_role($u) === 'admin';
+}
+// 会话归属：无 user 字段的历史会话对已登录用户可见
+function chat_owner_ok($chat) {
+    $owner = $chat['user'] ?? '';
+    if ($owner === '') return true;
+    return $owner === current_user() || is_admin();
+}
+
 $action = isset($_GET['action']) ? (string)$_GET['action'] : '';
 $method = $_SERVER['REQUEST_METHOD'];
 $body = [];
@@ -370,7 +405,97 @@ if ($method === 'POST' || $method === 'PUT' || $method === 'DELETE') {
     }
 }
 
+// 鉴权门：除登录/初始化/本人信息/只读分享与文件外，均需登录
+$publicActions = ['login', 'setup', 'me'];
+if ($action === 'share' && $method === 'GET') $publicActions[] = 'share';
+if ($action === 'file' && $method === 'GET') $publicActions[] = 'file';
+if (!in_array($action, $publicActions, true) && current_user() === null) {
+    json_out(['error' => '未登录', 'need_login' => true], 401);
+}
+
 switch ($action) {
+
+/* ---------------- 用户与会话 ---------------- */
+case 'setup':
+    if (count(load_users()) > 0) json_err('已存在用户，请直接登录', 403);
+    $username = trim((string)($body['username'] ?? ''));
+    $password = (string)($body['password'] ?? '');
+    if ($username === '' || strlen($password) < 4) json_err('用户名不能为空，密码至少 4 位');
+    save_users([[
+        'username' => $username,
+        'pass_hash' => password_hash($password, PASSWORD_DEFAULT),
+        'role' => 'admin',
+        'created_at' => time(),
+    ]]);
+    session_regenerate_id(true);
+    $_SESSION['ea_user'] = $username;
+    json_out(['ok' => true, 'username' => $username, 'role' => 'admin']);
+    break;
+
+case 'login':
+    $username = trim((string)($body['username'] ?? ''));
+    $password = (string)($body['password'] ?? '');
+    foreach (load_users() as $usr) {
+        if (($usr['username'] ?? '') === $username && password_verify($password, $usr['pass_hash'] ?? '')) {
+            session_regenerate_id(true);
+            $_SESSION['ea_user'] = $username;
+            json_out(['ok' => true, 'username' => $username, 'role' => $usr['role'] ?? 'user']);
+        }
+    }
+    json_err('用户名或密码错误', 401);
+    break;
+
+case 'logout':
+    unset($_SESSION['ea_user']);
+    session_destroy();
+    json_out(['ok' => true]);
+    break;
+
+case 'me':
+    $u = current_user();
+    if ($u === null) {
+        json_out(['logged_in' => false, 'has_users' => count(load_users()) > 0]);
+    } else {
+        json_out(['logged_in' => true, 'username' => $u, 'role' => user_role($u) ?: 'user']);
+    }
+    break;
+
+case 'users':
+    if (!is_admin()) json_err('需要管理员权限', 403);
+    json_out(['users' => array_map(function ($x) {
+        return ['username' => $x['username'], 'role' => $x['role'] ?? 'user', 'created_at' => $x['created_at'] ?? 0];
+    }, load_users())]);
+    break;
+
+case 'user_add':
+    if (!is_admin()) json_err('需要管理员权限', 403);
+    $username = trim((string)($body['username'] ?? ''));
+    $password = (string)($body['password'] ?? '');
+    $role = ($body['role'] ?? 'user') === 'admin' ? 'admin' : 'user';
+    if ($username === '' || strlen($password) < 4) json_err('用户名不能为空，密码至少 4 位');
+    $users = load_users();
+    foreach ($users as $x) if ($x['username'] === $username) json_err('用户名已存在');
+    $users[] = ['username' => $username, 'pass_hash' => password_hash($password, PASSWORD_DEFAULT), 'role' => $role, 'created_at' => time()];
+    save_users($users);
+    json_out(['ok' => true]);
+    break;
+
+case 'user_delete':
+    if (!is_admin()) json_err('需要管理员权限', 403);
+    $target = trim((string)($body['username'] ?? ''));
+    if ($target === current_user()) json_err('不能删除当前登录的自己');
+    $users = load_users();
+    $admins = 0;
+    foreach ($users as $x) if (($x['role'] ?? 'user') === 'admin') $admins++;
+    foreach ($users as $x) {
+        if ($x['username'] === $target && ($x['role'] ?? 'user') === 'admin' && $admins <= 1) {
+            json_err('不能删除唯一的管理员');
+        }
+    }
+    $users = array_values(array_filter($users, function ($x) use ($target) { return $x['username'] !== $target; }));
+    save_users($users);
+    json_out(['ok' => true]);
+    break;
 
 /* ---------------- 配置 ---------------- */
 case 'config':
@@ -379,6 +504,8 @@ case 'config':
         json_out([
             'name'   => $cfg['name'],
             'prompt' => $cfg['prompt'],
+            'embed_model' => $cfg['embed_model'] ?? '',
+            'embed_url' => $cfg['embed_url'] ?? '',
             'providers' => array_map(function ($p) {
                 return ['url' => $p['url'], 'key' => mask_key($p['key']), 'model' => $p['model']];
             }, $cfg['providers']),
@@ -393,6 +520,8 @@ case 'config':
     $new = default_config();
     $new['name']   = trim((string)($body['name'] ?? '')) ?: DEFAULT_NAME;
     $new['prompt'] = trim((string)($body['prompt'] ?? '')) ?: DEFAULT_PROMPT;
+    $new['embed_model'] = trim((string)($body['embed_model'] ?? ''));
+    $new['embed_url'] = trim((string)($body['embed_url'] ?? ''));
     $submitted = (isset($body['providers']) && is_array($body['providers'])) ? array_values($body['providers']) : [];
     $ps = [];
     foreach ($submitted as $p) {
@@ -425,6 +554,7 @@ case 'chats':
     foreach (glob(CHATS_DIR . '/*.json') ?: [] as $f) {
         $c = jread($f, null);
         if (!is_array($c) || empty($c['id'])) continue;
+        if (!chat_owner_ok($c)) continue;
         if ($q !== '') {
             $hit = str_has((string)($c['title'] ?? ''), $q);
             if (!$hit) {
@@ -447,6 +577,7 @@ case 'chat':
         if ($id === '') json_err('缺少 id');
         $c = read_chat_file($id);
         if (!$c) json_err('会话不存在', 404);
+        if (!chat_owner_ok($c)) json_err('无权访问他人的会话', 403);
         json_out($c);
     }
 
@@ -494,7 +625,11 @@ case 'chat':
 
 case 'chat_delete':
     $id = clean_id($body['id'] ?? '');
-    if ($id !== '') @unlink(CHATS_DIR . '/' . $id . '.json');
+    if ($id !== '') {
+        $c = read_chat_file($id);
+        if ($c && !chat_owner_ok($c)) json_err('无权删除他人的会话', 403);
+        @unlink(CHATS_DIR . '/' . $id . '.json');
+    }
     json_out(['ok' => true]);
     break;
 
@@ -503,6 +638,7 @@ case 'chat_move':
     $id = clean_id($body['id'] ?? '');
     $c = read_chat_file($id);
     if (!$c) json_err('会话不存在', 404);
+    if (!chat_owner_ok($c)) json_err('无权操作他人的会话', 403);
     $c['folder'] = clean_id($body['folder'] ?? '');
     jwrite(CHATS_DIR . '/' . $id . '.json', $c);
     json_out(['ok' => true]);
@@ -705,6 +841,57 @@ case 'upload_delete':
     json_out(['ok' => true]);
     break;
 
+/* ---------------- RAG 知识库 ---------------- */
+case 'kb_list':
+    $kb = load_kb();
+    $out = [];
+    foreach ($kb as $doc) {
+        $out[] = [
+            'id' => $doc['id'] ?? '',
+            'title' => $doc['title'] ?? '',
+            'chunks' => count($doc['chunks'] ?? []),
+            'chars' => $doc['chars'] ?? 0,
+            'created_at' => $doc['created_at'] ?? 0,
+        ];
+    }
+    json_out(['docs' => $out, 'embed_ready' => rag_endpoint(load_config()) !== null]);
+    break;
+
+case 'kb_add':
+    $cfg = load_config();
+    if (rag_endpoint($cfg) === null) json_err('尚未配置嵌入模型：请在设置里填写 embed_model（如 text-embedding-3-small 或 Ollama 的 nomic-embed-text）');
+    $title = trim((string)($body['title'] ?? ''));
+    $content = (string)($body['content'] ?? '');
+    if ($title === '' || trim($content) === '') json_err('标题和内容不能为空');
+    $chunks = chunk_text($content);
+    if (!$chunks) json_err('内容分块失败');
+    if (count($chunks) > 200) json_err('内容过长（超过 200 块），请拆分后上传');
+    $vecs = embed_batch($cfg, $chunks);
+    if ($vecs === null) json_err('向量化失败：请检查 embed_model / embed_url 是否正确');
+    $docChunks = [];
+    foreach ($chunks as $i => $c) $docChunks[] = ['text' => $c, 'vec' => $vecs[$i]];
+    $kb = load_kb();
+    $id = 'kb_' . date('YmdHis') . substr(md5(uniqid('', true)), 0, 6);
+    $kb[] = ['id' => $id, 'title' => str_cut($title, 80), 'chunks' => $docChunks, 'chars' => strlen($content), 'created_at' => time()];
+    jwrite(KB_FILE, $kb);
+    json_out(['ok' => true, 'id' => $id, 'chunks' => count($docChunks)]);
+    break;
+
+case 'kb_delete':
+    $id = clean_id($body['id'] ?? '');
+    $kb = array_values(array_filter(load_kb(), function ($d) use ($id) { return ($d['id'] ?? '') !== $id; }));
+    jwrite(KB_FILE, $kb);
+    json_out(['ok' => true]);
+    break;
+
+case 'kb_query':
+    $cfg = load_config();
+    $q = trim((string)($body['q'] ?? ''));
+    if ($q === '') json_err('缺少问题');
+    $hits = kb_retrieve($cfg, $q, (int)($body['top_k'] ?? 4));
+    json_out(['hits' => array_map(function ($h) { return ['score' => round($h['score'], 4), 'title' => $h['title'], 'text' => str_cut($h['text'], 800)]; }, $hits)]);
+    break;
+
 /* ---------------- 独立搜索（调试用） ---------------- */
 case 'websearch':
     $q = trim((string)($_GET['q'] ?? ''));
@@ -803,6 +990,31 @@ case 'generate':
                 ? "\n\n【用户上传了附件】如需了解图片内容，请调用 read_image 工具（传入 image_id）：\n"
                 : "\n\n【用户上传了附件】如需读取文件内容，请调用 read_file 工具（传入 file_id）：\n";
             $full[$lastIdx]['content'] .= $hint . $list;
+        }
+    }
+
+    // RAG：从知识库检索相关片段注入上下文
+    $rag = !empty($body['rag']);
+    $ragSources = [];
+    if ($rag) {
+        $lastUser = '';
+        for ($k = count($full) - 1; $k >= 0; $k--) {
+            if ($full[$k]['role'] === 'user') { $lastUser = $full[$k]['content']; break; }
+        }
+        $q = str_cut(trim((string)preg_replace('/\s+/', ' ', strip_tags($lastUser))), 200);
+        if ($q !== '') {
+            $hits = kb_retrieve($cfg, $q, 4);
+            if ($hits) {
+                $kbCtx = "\n\n【知识库相关资料】以下是从用户知识库检索到的内容，回答时请优先参考并标注来源：\n";
+                foreach ($hits as $hi => $h) {
+                    $kbCtx .= '--- 来源[' . ($hi + 1) . '] ' . $h['title'] . '（相关度 ' . number_format($h['score'], 2) . "）---\n" . str_cut($h['text'], 1000) . "\n";
+                    $ragSources[] = ['title' => $h['title'], 'score' => round($h['score'], 3)];
+                }
+                for ($k = count($full) - 1; $k >= 0; $k--) {
+                    if ($full[$k]['role'] === 'user') { $full[$k]['content'] .= $kbCtx; break; }
+                }
+                $sse(['rag_sources' => $ragSources]);
+            }
         }
     }
 
@@ -1138,6 +1350,119 @@ function extract_pdf($path, &$err) {
     $text = trim($text);
     if ($text === '') { $err = '无法提取 PDF 文本（建议服务器安装 pdftotext：apt install poppler-utils）'; return null; }
     return $text;
+}
+
+/* ------------------------------------------------------------------ */
+/* RAG 知识库：分块 + embeddings 向量化 + 余弦检索                      */
+/* ------------------------------------------------------------------ */
+
+// 从聊天线路推导 embeddings 端点与模型
+function rag_endpoint($cfg) {
+    $embedUrl = trim((string)($cfg['embed_url'] ?? ''));
+    $embedModel = trim((string)($cfg['embed_model'] ?? ''));
+    if ($embedModel === '') return null;
+    if ($embedUrl === '') {
+        foreach ($cfg['providers'] as $p) {
+            if ($p['url'] !== '' && $p['key'] !== '') {
+                $u = $p['url'];
+                if (strpos($u, '/chat/completions') !== false) {
+                    $embedUrl = str_replace('/chat/completions', '/embeddings', $u);
+                } else {
+                    $embedUrl = rtrim($u, '/') . '/embeddings';
+                }
+                break;
+            }
+        }
+    }
+    if ($embedUrl === '') return null;
+    return ['url' => $embedUrl, 'model' => $embedModel];
+}
+
+// 批量向量化：OpenAI 兼容 /embeddings，input 支持数组
+function embed_batch($cfg, $texts) {
+    $ep = rag_endpoint($cfg);
+    if ($ep === null) return null;
+    $key = '';
+    foreach ($cfg['providers'] as $p) { if ($p['key'] !== '') { $key = $p['key']; break; } }
+    $payload = ['model' => $ep['model'], 'input' => $texts];
+    $ch = curl_init();
+    curl_setopt_array($ch, [
+        CURLOPT_URL => $ep['url'],
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE),
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Authorization: Bearer ' . $key],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 120,
+        CURLOPT_SSL_VERIFYPEER => false,
+    ]);
+    $resp = curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    curl_close($ch);
+    if ($code !== 200 || !$resp) return null;
+    $d = json_decode($resp, true);
+    if (!isset($d['data']) || !is_array($d['data'])) return null;
+    // 按 index 排序，返回 embedding 数组
+    usort($d['data'], function ($a, $b) { return ($a['index'] ?? 0) <=> ($b['index'] ?? 0); });
+    $vecs = [];
+    foreach ($d['data'] as $row) { if (isset($row['embedding'])) $vecs[] = $row['embedding']; }
+    return count($vecs) === count($texts) ? $vecs : null;
+}
+
+// 简单分块：按段落/句子切，目标长度约 500 字
+function chunk_text($text, $target = 500) {
+    $text = trim((string)$text);
+    if ($text === '') return [];
+    $paras = preg_split('/\n{2,}/', $text);
+    $chunks = [];
+    $buf = '';
+    foreach ($paras as $p) {
+        $p = trim($p);
+        if ($p === '') continue;
+        if (strlen($buf) + strlen($p) <= $target * 3 || $buf === '') {
+            $buf .= ($buf === '' ? '' : "\n\n") . $p;
+        } else {
+            $chunks[] = $buf;
+            $buf = $p;
+        }
+        while (strlen($buf) > $target * 3) {
+            $chunks[] = substr($buf, 0, $target * 3);
+            $buf = substr($buf, $target * 3);
+        }
+    }
+    if ($buf !== '') $chunks[] = $buf;
+    return array_values(array_filter($chunks, function ($c) { return trim($c) !== ''; }));
+}
+
+function cosine($a, $b) {
+    $dot = 0.0; $na = 0.0; $nb = 0.0;
+    $n = min(count($a), count($b));
+    for ($i = 0; $i < $n; $i++) {
+        $dot += $a[$i] * $b[$i];
+        $na += $a[$i] * $a[$i];
+        $nb += $b[$i] * $b[$i];
+    }
+    if ($na <= 0 || $nb <= 0) return 0.0;
+    return $dot / (sqrt($na) * sqrt($nb));
+}
+
+function load_kb() { return jread(KB_FILE, []); }
+
+// 用最后一个用户问题检索知识库 top-k 片段
+function kb_retrieve($cfg, $q, $topK = 4) {
+    $kb = load_kb();
+    if (!$kb) return [];
+    $qv = embed_batch($cfg, [$q]);
+    if ($qv === null) return [];
+    $qvec = $qv[0];
+    $scored = [];
+    foreach ($kb as $doc) {
+        foreach (($doc['chunks'] ?? []) as $ci => $ch) {
+            if (empty($ch['vec'])) continue;
+            $scored[] = ['score' => cosine($qvec, $ch['vec']), 'text' => $ch['text'], 'title' => $doc['title'] ?? ''];
+        }
+    }
+    usort($scored, function ($a, $b) { return $b['score'] <=> $a['score']; });
+    return array_slice($scored, 0, $topK);
 }
 
 /* ------------------------------------------------------------------ */
