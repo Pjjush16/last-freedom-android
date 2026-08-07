@@ -1123,10 +1123,9 @@ function build_tool_defs($web, $hasImage, $hasFile, $agent = false) {
             'parameters'=>['type'=>'object','properties'=>['url'=>['type'=>'string','description'=>'完整 URL（http:// 或 https:// 开头）']],'required'=>['url']]
         ]];
         $tools[] = ['type'=>'function','function'=>[
-            'name'=>'wikipedia','description'=>'搜索维基百科获取百科知识。',
+            'name'=>'baike','description'=>'搜索百度百科获取百科知识（中文百科，国内可直接访问）。',
             'parameters'=>['type'=>'object','properties'=>[
-                'query'=>['type'=>'string','description'=>'搜索关键词'],
-                'language'=>['type'=>'string','description'=>'语言代码：zh（中文，默认）、en（英文）等']
+                'query'=>['type'=>'string','description'=>'搜索关键词']
             ],'required'=>['query']]
         ]];
     }
@@ -1177,7 +1176,7 @@ function exec_tool($name, $args, $ctx, &$allSources) {
         case 'time_now':   return exec_time_now($args);
         case 'get_weather':return exec_get_weather($args);
         case 'url_read':   return exec_url_read($args);
-        case 'wikipedia':  return exec_wikipedia($args);
+        case 'baike':     return exec_baike($args);
         case 'code_run':   return exec_code_run($args);
         case 'file_write': return exec_file_write($args);
         default: return '未知工具：' . $name;
@@ -1232,22 +1231,30 @@ function exec_url_read($args) {
 }
 
 /* ------------------------------------------------------------------ */
-/* 查百科（Wikipedia，免 Key）                                          */
+/* 查百科（百度百科优先，被反爬时自动降级为网页搜索）                    */
 /* ------------------------------------------------------------------ */
-function exec_wikipedia($args) {
+function exec_baike($args) {
     $q = trim((string)($args['query'] ?? ''));
     if ($q === '') return '请提供搜索词。';
-    $lang = trim((string)($args['language'] ?? '')) ?: 'zh';
-    if (!preg_match('/^[a-z]{2}$/', $lang)) $lang = 'zh';
-    $url = "https://{$lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=" . urlencode($q) . "&format=json&srlimit=3";
-    $json = http_get($url, 12);
-    if ($json === '') return '百科搜索失败。';
-    $d = json_decode($json, true);
-    if (!is_array($d) || !isset($d['query']['search'])) return '百科搜索无结果。';
-    $out = "维基百科搜索「{$q}」结果：\n";
-    foreach ($d['query']['search'] as $r) {
-        $snippet = strip_tags((string)($r['snippet'] ?? ''));
-        $out .= '- ' . ($r['title'] ?? '') . '：' . str_cut($snippet, 300) . "\n";
+    // 优先百度百科
+    $url = 'https://baike.baidu.com/item/' . urlencode($q);
+    $html = http_get($url, 12);
+    if ($html !== '' && strlen($html) > 2000) {
+        $summary = '';
+        if (preg_match('/<meta\s+name=["\']description["\']\s+content=["\']([^"\']+)/i', $html, $m)) {
+            $summary = html_entity_decode($m[1], ENT_QUOTES, 'UTF-8');
+        }
+        if (mb_strlen($summary) < 30) {
+            $summary = str_cut(html_to_text($html), 3000);
+        }
+        if (trim($summary) !== '') return "百度百科「{$q}」：\n" . str_cut($summary, 3000);
+    }
+    // 百科不可用 → 降级为网页搜索
+    $results = web_search($q, 3);
+    if (!$results) return '未找到「' . $q . '」的相关内容。';
+    $out = "百科「{$q}」搜索结果：\n";
+    foreach ($results as $i => $r) {
+        $out .= '[' . ($i + 1) . '] ' . $r['title'] . "\n" . $r['snippet'] . "\n\n";
     }
     return $out;
 }
