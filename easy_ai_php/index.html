@@ -667,6 +667,9 @@ body.share-mode .msg-actions{display:none !important}
             <button class="tool-btn" id="btnAutoRead" title="自动朗读回复">
               <svg class="ic" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 010 7.07M19.07 4.93a10 10 0 010 14.14"/></svg>
             </button>
+            <button class="tool-btn" id="btnAgent" title="Agent 模式：允许跑代码和写文件">
+              <svg class="ic" viewBox="0 0 24 24"><path d="M12 2l2 7h7l-5.5 4 2 7-5.5-4-5.5 4 2-7L2 9h7z"/></svg>
+            </button>
             <span class="foot-inline"></span>
           </div>
         </div>
@@ -699,11 +702,11 @@ body.share-mode .msg-actions{display:none !important}
       </section>
       <section>
         <h3>知识库 · RAG</h3>
-        <label>嵌入模型 embed_model（必填才启用 RAG）</label>
+        <label>嵌入模型 embed_model（选填：不填走关键词检索，填了走语义检索）</label>
         <input id="cfgEmbedModel" placeholder="OpenAI: text-embedding-3-small | Ollama: nomic-embed-text">
         <label>嵌入端点 embed_url（留空则自动取第一条线路推导）</label>
         <input id="cfgEmbedUrl" placeholder="https://api.openai.com/v1/embeddings">
-        <p class="hint">知识库文档会被切块并向量化存储；对话开启 RAG 后自动检索相关片段注入上下文。</p>
+        <p class="hint">知识库文档会被自动切块存储；对话开启 RAG 后自动检索相关片段注入上下文。不配嵌入模型也能用（关键词检索），配了效果更好（语义检索）。</p>
         <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
           <input id="kbTitle" placeholder="文档标题" style="flex:1">
           <button class="btn btn-ghost" id="kbPickFile" style="padding:8px 12px">导入文件</button>
@@ -1330,6 +1333,7 @@ let miniOkCb=null;
 let searchTimer=null;
 let webEnabled=localStorage.getItem('ea_web')==='1';
 let ragEnabled=localStorage.getItem('ea_rag')==='1';
+let agentEnabled=localStorage.getItem('ea_agent')==='1';
 let pendingAttachments=[];
 
 const boxEl=$('#messages'), welcomeEl=$('#welcome'), scrollEl=$('#chatScroll');
@@ -1660,7 +1664,7 @@ async function send(text,regen){
     const resp=await fetch(API+'?action=generate',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({messages:messages.map(m=>({role:m.role,content:stripAtt(m.content)+(m._clientCtx||'')})),provider:activeProvider,web:webEnabled,rag:ragEnabled,attachments:atts.filter(a=>!a._clientText).map(a=>({id:a.id}))}),
+      body:JSON.stringify({messages:messages.map(m=>({role:m.role,content:stripAtt(m.content)+(m._clientCtx||'')})),provider:activeProvider,web:webEnabled,rag:ragEnabled,agent:agentEnabled,attachments:atts.filter(a=>!a._clientText).map(a=>({id:a.id}))}),
       signal:aborter.signal
     });
     if(!resp.ok||!resp.body){
@@ -2614,6 +2618,16 @@ $('#btnRag').addEventListener('click',()=>{
   syncRagBtn();
   toast(ragEnabled?'RAG 已开启 · 将检索知识库':'RAG 已关闭');
 });
+function syncAgentBtn(){
+  $('#btnAgent').classList.toggle('active',agentEnabled);
+  $('#btnAgent').title=agentEnabled?'Agent 模式：开（模型可执行代码和写文件）':'Agent 模式：关';
+}
+$('#btnAgent').addEventListener('click',()=>{
+  agentEnabled=!agentEnabled;
+  localStorage.setItem('ea_agent',agentEnabled?'1':'0');
+  syncAgentBtn();
+  toast(agentEnabled?'Agent 已开启 · 模型可跑代码和写文件':'Agent 已关闭');
+});
 
 /* ---------- 知识库（RAG）管理 ---------- */
 async function loadKbList(){
@@ -2628,10 +2642,12 @@ function renderKbList(docs,embedReady){
   if(!box)return;
   box.innerHTML='';
   if(!embedReady){
-    box.innerHTML='<p class="hint" style="color:var(--danger)">尚未配置 embed_model，知识库暂不可用。请先在上方填写嵌入模型。</p>';
-    return;
+    const tip=document.createElement('p');
+    tip.className='hint';
+    tip.textContent='当前为关键词检索模式（零配置可用）。在上方填写 embed_model 后自动升级为语义检索，效果更好。';
+    box.appendChild(tip);
   }
-  if(!docs.length){box.innerHTML='<p class="hint">知识库为空，先在上方添加文档。</p>';return}
+  if(!docs.length){const e=document.createElement('p');e.className='hint';e.textContent='知识库为空，先在上方添加文档。';box.appendChild(e);return}
   docs.forEach(d=>{
     const row=document.createElement('div');
     row.style.cssText='display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--gray-750);border-radius:9px;margin-bottom:6px';
@@ -2667,7 +2683,7 @@ $('#kbAdd').addEventListener('click',async()=>{
     const r=await fetch(API+'?action=kb_add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,content})});
     const d=await r.json();
     if(!d.ok&&!d.id){toast(d.error||'添加失败');return}
-    toast('已入库：'+d.chunks+' 个片段');
+    toast('已入库：'+d.chunks+' 个片段 · '+(d.mode==='semantic'?'语义模式':'关键词模式'));
     $('#kbTitle').value='';$('#kbContent').value='';
     loadKbList();
   }catch(e){toast('添加失败：'+e.message)}
@@ -2875,6 +2891,7 @@ async function initApp(){
   renderChatList();
   syncWebBtn();
   syncRagBtn();
+  syncAgentBtn();
   syncAutoReadBtn();
   if(AUTH&&AUTH.role==='admin')renderUserManager();
   showWelcome(true);

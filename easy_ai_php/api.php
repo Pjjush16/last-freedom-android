@@ -859,22 +859,25 @@ case 'kb_list':
 
 case 'kb_add':
     $cfg = load_config();
-    if (rag_endpoint($cfg) === null) json_err('尚未配置嵌入模型：请在设置里填写 embed_model（如 text-embedding-3-small 或 Ollama 的 nomic-embed-text）');
+    $hasEmbed = rag_endpoint($cfg) !== null;
     $title = trim((string)($body['title'] ?? ''));
     $content = (string)($body['content'] ?? '');
     if ($title === '' || trim($content) === '') json_err('标题和内容不能为空');
     $chunks = chunk_text($content);
     if (!$chunks) json_err('内容分块失败');
     if (count($chunks) > 200) json_err('内容过长（超过 200 块），请拆分后上传');
-    $vecs = embed_batch($cfg, $chunks);
-    if ($vecs === null) json_err('向量化失败：请检查 embed_model / embed_url 是否正确');
+    $vecs = null;
+    if ($hasEmbed) {
+        $vecs = embed_batch($cfg, $chunks);
+        if ($vecs === null) json_err('向量化失败：请检查 embed_model / embed_url 是否正确（或留空 embed_model 改用关键词检索）');
+    }
     $docChunks = [];
-    foreach ($chunks as $i => $c) $docChunks[] = ['text' => $c, 'vec' => $vecs[$i]];
+    foreach ($chunks as $i => $c) $docChunks[] = ['text' => $c, 'vec' => $vecs ? $vecs[$i] : null];
     $kb = load_kb();
     $id = 'kb_' . date('YmdHis') . substr(md5(uniqid('', true)), 0, 6);
     $kb[] = ['id' => $id, 'title' => str_cut($title, 80), 'chunks' => $docChunks, 'chars' => strlen($content), 'created_at' => time()];
     jwrite(KB_FILE, $kb);
-    json_out(['ok' => true, 'id' => $id, 'chunks' => count($docChunks)]);
+    json_out(['ok' => true, 'id' => $id, 'chunks' => count($docChunks), 'mode' => $hasEmbed ? 'semantic' : 'keyword']);
     break;
 
 case 'kb_delete':
@@ -972,7 +975,8 @@ case 'generate':
     }
 
     // 技能注册表：按场景动态组装
-    $tools = build_tool_defs($web, $hasImage, $hasFile);
+    $agent = !empty($body['agent']);
+    $tools = build_tool_defs($web, $hasImage, $hasFile, $agent);
 
     // 把附件清单注入到最后一条用户消息，让模型知道有哪些文件可用
     if ($attachments) {
@@ -1097,57 +1101,69 @@ exit;
 /* ------------------------------------------------------------------ */
 
 // 按场景组装工具定义
-function build_tool_defs($web, $hasImage, $hasFile) {
+function build_tool_defs($web, $hasImage, $hasFile, $agent = false) {
     $tools = [];
+    // 始终可用
+    $tools[] = ['type'=>'function','function'=>[
+        'name'=>'time_now','description'=>'获取当前日期和时间。当用户问"今天几号""现在几点"等时间相关问题时调用。',
+        'parameters'=>['type'=>'object','properties'=>['timezone'=>['type'=>'string','description'=>'时区如 Asia/Shanghai，留空用默认']],'required'=>[]]
+    ]];
+    $tools[] = ['type'=>'function','function'=>[
+        'name'=>'get_weather','description'=>'获取指定地点的当前天气（温度、湿度、风力、天气状况）。',
+        'parameters'=>['type'=>'object','properties'=>['location'=>['type'=>'string','description'=>'城市名（中文或英文）']],'required'=>['location']]
+    ]];
+    // 联网时可用
     if ($web) {
-        $tools[] = [
-            'type' => 'function',
-            'function' => [
-                'name' => 'web_search',
-                'description' => '搜索互联网获取实时信息（最新新闻、产品发布、价格、赛事、天气、时效性事实等）。当用户问题需要最新信息或事实核查时必须调用；query 使用提炼后的简洁关键词。',
-                'parameters' => [
-                    'type' => 'object',
-                    'properties' => [
-                        'query' => ['type' => 'string', 'description' => '搜索关键词，简洁准确']
-                    ],
-                    'required' => ['query']
-                ]
-            ]
-        ];
+        $tools[] = ['type'=>'function','function'=>[
+            'name'=>'web_search','description'=>'搜索互联网获取实时信息（最新新闻、产品发布、价格、赛事、天气、时效性事实等）。query 使用提炼后的简洁关键词。',
+            'parameters'=>['type'=>'object','properties'=>['query'=>['type'=>'string','description'=>'搜索关键词，简洁准确']],'required'=>['query']]
+        ]];
+        $tools[] = ['type'=>'function','function'=>[
+            'name'=>'url_read','description'=>'读取指定网页的内容（获取 URL 的正文文本，用于查阅资料、验证信息、读文章等）。',
+            'parameters'=>['type'=>'object','properties'=>['url'=>['type'=>'string','description'=>'完整 URL（http:// 或 https:// 开头）']],'required'=>['url']]
+        ]];
+        $tools[] = ['type'=>'function','function'=>[
+            'name'=>'wikipedia','description'=>'搜索维基百科获取百科知识。',
+            'parameters'=>['type'=>'object','properties'=>[
+                'query'=>['type'=>'string','description'=>'搜索关键词'],
+                'language'=>['type'=>'string','description'=>'语言代码：zh（中文，默认）、en（英文）等']
+            ],'required'=>['query']]
+        ]];
     }
     if ($hasImage) {
-        $tools[] = [
-            'type' => 'function',
-            'function' => [
-                'name' => 'read_image',
-                'description' => '读取并理解用户上传的图片内容（OCR 识别文字、描述画面、读取图表/截图/照片）。只要用户提到图片内容、想知道图片里有什么，就必须调用此工具。',
-                'parameters' => [
-                    'type' => 'object',
-                    'properties' => [
-                        'image_id' => ['type' => 'string', 'description' => '图片附件的 id（形如 u_xxx）'],
-                        'question' => ['type' => 'string', 'description' => '针对图片的具体问题，如"图里写了什么字"；留空则整体描述']
-                    ],
-                    'required' => ['image_id']
-                ]
-            ]
-        ];
+        $tools[] = ['type'=>'function','function'=>[
+            'name'=>'read_image','description'=>'读取并理解用户上传的图片内容（OCR 识别文字、描述画面、读取图表/截图/照片）。只要用户提到图片内容、想知道图片里有什么，就必须调用此工具。',
+            'parameters'=>['type'=>'object','properties'=>[
+                'image_id'=>['type'=>'string','description'=>'图片附件的 id（形如 u_xxx）'],
+                'question'=>['type'=>'string','description'=>'针对图片的具体问题，如"图里写了什么字"；留空则整体描述']
+            ],'required'=>['image_id']]
+        ]];
     }
     if ($hasFile) {
-        $tools[] = [
-            'type' => 'function',
-            'function' => [
-                'name' => 'read_file',
-                'description' => '读取用户上传的文档内容（txt/md/csv/json/log/pdf/docx）。只要用户提到文件内容、想总结/翻译/分析文件，就必须调用此工具。',
-                'parameters' => [
-                    'type' => 'object',
-                    'properties' => [
-                        'file_id' => ['type' => 'string', 'description' => '文件附件的 id（形如 u_xxx）'],
-                        'instruction' => ['type' => 'string', 'description' => '对文件内容的处理要求，如"总结要点"；留空则原样返回']
-                    ],
-                    'required' => ['file_id']
-                ]
-            ]
-        ];
+        $tools[] = ['type'=>'function','function'=>[
+            'name'=>'read_file','description'=>'读取用户上传的文档内容（txt/md/csv/json/log/pdf/docx）。只要用户提到文件内容、想总结/翻译/分析文件，就必须调用此工具。',
+            'parameters'=>['type'=>'object','properties'=>[
+                'file_id'=>['type'=>'string','description'=>'文件附件的 id（形如 u_xxx）'],
+                'instruction'=>['type'=>'string','description'=>'对文件内容的处理要求，如"总结要点"；留空则原样返回']
+            ],'required'=>['file_id']]
+        ]];
+    }
+    // Agent 模式：执行代码、写文件
+    if ($agent) {
+        $tools[] = ['type'=>'function','function'=>[
+            'name'=>'code_run','description'=>'执行 Python 或 JavaScript 代码并返回输出。用于数据处理、数学计算、生成文件、自动化任务等。代码在沙箱中运行（10秒超时、限制文件大小）。',
+            'parameters'=>['type'=>'object','properties'=>[
+                'language'=>['type'=>'string','description'=>'编程语言：python 或 javascript'],
+                'code'=>['type'=>'string','description'=>'要执行的完整代码']
+            ],'required'=>['language','code']]
+        ]];
+        $tools[] = ['type'=>'function','function'=>[
+            'name'=>'file_write','description'=>'保存内容到文件（持久化代码输出、生成文档等）。文件保存在服务器的 data/workspace/ 目录。',
+            'parameters'=>['type'=>'object','properties'=>[
+                'filename'=>['type'=>'string','description'=>'文件名（仅字母数字._-）'],
+                'content'=>['type'=>'string','description'=>'文件内容']
+            ],'required'=>['filename','content']]
+        ]];
     }
     return $tools;
 }
@@ -1155,15 +1171,126 @@ function build_tool_defs($web, $hasImage, $hasFile) {
 // 工具分发器
 function exec_tool($name, $args, $ctx, &$allSources) {
     switch ($name) {
-        case 'web_search':
-            return exec_web_search_tool($args, $allSources);
-        case 'read_image':
-            return exec_read_image($args, $ctx);
-        case 'read_file':
-            return exec_read_file($args, $ctx);
-        default:
-            return '未知工具：' . $name;
+        case 'web_search': return exec_web_search_tool($args, $allSources);
+        case 'read_image': return exec_read_image($args, $ctx);
+        case 'read_file':  return exec_read_file($args, $ctx);
+        case 'time_now':   return exec_time_now($args);
+        case 'get_weather':return exec_get_weather($args);
+        case 'url_read':   return exec_url_read($args);
+        case 'wikipedia':  return exec_wikipedia($args);
+        case 'code_run':   return exec_code_run($args);
+        case 'file_write': return exec_file_write($args);
+        default: return '未知工具：' . $name;
     }
+}
+
+/* ------------------------------------------------------------------ */
+/* 报时                                                                 */
+/* ------------------------------------------------------------------ */
+function exec_time_now($args) {
+    $tz = trim((string)($args['timezone'] ?? '')) ?: 'Asia/Shanghai';
+    try {
+        $dt = new DateTime('now', new DateTimeZone($tz));
+        $weekday = ['日','一','二','三','四','五','六'][(int)$dt->format('w')];
+        return '当前时间：' . $dt->format('Y-m-d H:i:s') . '（星期' . $weekday . '）时区 ' . $tz;
+    } catch (Exception $e) {
+        $dt = new DateTime('now');
+        return '当前时间：' . $dt->format('Y-m-d H:i:s') . '（UTC，时区参数无效：' . $tz . '）';
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* 查天气（wttr.in，免 Key）                                            */
+/* ------------------------------------------------------------------ */
+function exec_get_weather($args) {
+    $loc = trim((string)($args['location'] ?? ''));
+    if ($loc === '') return '请提供地点。';
+    $url = 'https://wttr.in/' . urlencode($loc) . '?format=j1&lang=zh';
+    $json = http_get($url, 12);
+    if ($json === '') return '天气数据获取失败（wttr.in 不可达）。';
+    $d = json_decode($json, true);
+    if (!is_array($d) || !isset($d['current_condition'][0])) return '天气数据解析失败。';
+    $c = $d['current_condition'][0];
+    $area = $d['nearest_area'][0]['areaName'][0]['value'] ?? $loc;
+    $desc = $c['lang_ZH'][0]['value'] ?? ($c['weatherDesc'][0]['value'] ?? '未知');
+    return sprintf("%s 天气：%s，%s°C，体感 %s°C，湿度 %s%%，风 %s km/h（%s）",
+        $area, $desc, $c['temp_C'], $c['FeelsLikeC'], $c['humidity'], $c['windspeedKmph'], $c['winddir16Point']);
+}
+
+/* ------------------------------------------------------------------ */
+/* 读网页                                                               */
+/* ------------------------------------------------------------------ */
+function exec_url_read($args) {
+    $url = trim((string)($args['url'] ?? ''));
+    if ($url === '') return '请提供 URL。';
+    if (!preg_match('#^https?://#i', $url)) return 'URL 必须以 http:// 或 https:// 开头。';
+    $html = http_get($url, 15);
+    if ($html === '') return '获取网页失败（' . $url . '）。';
+    $text = html_to_text($html);
+    if ($text === '') return '网页内容为空或无法提取文本。';
+    return '网页内容（' . $url . "）：\n" . str_cut($text, 8000);
+}
+
+/* ------------------------------------------------------------------ */
+/* 查百科（Wikipedia，免 Key）                                          */
+/* ------------------------------------------------------------------ */
+function exec_wikipedia($args) {
+    $q = trim((string)($args['query'] ?? ''));
+    if ($q === '') return '请提供搜索词。';
+    $lang = trim((string)($args['language'] ?? '')) ?: 'zh';
+    if (!preg_match('/^[a-z]{2}$/', $lang)) $lang = 'zh';
+    $url = "https://{$lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=" . urlencode($q) . "&format=json&srlimit=3";
+    $json = http_get($url, 12);
+    if ($json === '') return '百科搜索失败。';
+    $d = json_decode($json, true);
+    if (!is_array($d) || !isset($d['query']['search'])) return '百科搜索无结果。';
+    $out = "维基百科搜索「{$q}」结果：\n";
+    foreach ($d['query']['search'] as $r) {
+        $snippet = strip_tags((string)($r['snippet'] ?? ''));
+        $out .= '- ' . ($r['title'] ?? '') . '：' . str_cut($snippet, 300) . "\n";
+    }
+    return $out;
+}
+
+/* ------------------------------------------------------------------ */
+/* 执行代码（沙箱：临时目录 + timeout + ulimit）                        */
+/* ------------------------------------------------------------------ */
+function exec_code_run($args) {
+    $lang = strtolower(trim((string)($args['language'] ?? '')));
+    $code = (string)($args['code'] ?? '');
+    if ($code === '') return '没有提供代码。';
+    $runners = ['python'=>['python3','.py'], 'javascript'=>['node','.js'], 'js'=>['node','.js']];
+    if (!isset($runners[$lang])) return '不支持的语言：' . $lang . '。请用 python 或 javascript。';
+    list($runner, $ext) = $runners[$lang];
+    if (!function_exists('shell_exec')) return '服务器禁用了 shell_exec，无法执行代码。';
+    $bin = trim((string)@shell_exec("command -v $runner 2>/dev/null"));
+    if ($bin === '') return "服务器未安装 $runner。";
+    $dir = DATA_DIR . '/code_runs';
+    if (!is_dir($dir)) @mkdir($dir, 0777, true);
+    $tmp = $dir . '/' . substr(md5(uniqid('', true)), 0, 12) . $ext;
+    file_put_contents($tmp, $code);
+    $cmd = 'cd ' . escapeshellarg($dir) . ' && timeout 10 ' . escapeshellarg($bin) . ' ' . escapeshellarg($tmp) . ' 2>&1';
+    $output = @shell_exec($cmd);
+    @unlink($tmp);
+    if ($output === null) return '代码执行失败。';
+    $output = trim($output);
+    if (strlen($output) > 8000) $output = str_cut($output, 8000) . "\n…（输出已截断）";
+    return "代码执行输出：\n" . ($output !== '' ? $output : '（无输出）');
+}
+
+/* ------------------------------------------------------------------ */
+/* 写文件                                                               */
+/* ------------------------------------------------------------------ */
+function exec_file_write($args) {
+    $name = trim((string)($args['filename'] ?? ''));
+    $content = (string)($args['content'] ?? '');
+    if ($name === '') return '请提供文件名。';
+    $name = preg_replace('/[^A-Za-z0-9._-]/', '_', $name);
+    if (strlen($name) > 100) $name = substr($name, 0, 100);
+    $dir = DATA_DIR . '/workspace';
+    if (!is_dir($dir)) @mkdir($dir, 0777, true);
+    file_put_contents($dir . '/' . $name, $content);
+    return '文件已保存：' . $name . '（' . strlen($content) . ' 字节），路径 data/workspace/' . $name;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1451,17 +1578,64 @@ function load_kb() { return jread(KB_FILE, []); }
 function kb_retrieve($cfg, $q, $topK = 4) {
     $kb = load_kb();
     if (!$kb) return [];
-    $qv = embed_batch($cfg, [$q]);
-    if ($qv === null) return [];
-    $qvec = $qv[0];
-    $scored = [];
-    foreach ($kb as $doc) {
-        foreach (($doc['chunks'] ?? []) as $ci => $ch) {
-            if (empty($ch['vec'])) continue;
-            $scored[] = ['score' => cosine($qvec, $ch['vec']), 'text' => $ch['text'], 'title' => $doc['title'] ?? ''];
+    // 优先语义检索（需配置嵌入模型）
+    if (rag_endpoint($cfg) !== null) {
+        $qv = embed_batch($cfg, [$q]);
+        if ($qv !== null) {
+            $qvec = $qv[0];
+            $scored = [];
+            foreach ($kb as $doc) {
+                foreach (($doc['chunks'] ?? []) as $ci => $ch) {
+                    if (empty($ch['vec'])) continue;
+                    $scored[] = ['score' => cosine($qvec, $ch['vec']), 'text' => $ch['text'], 'title' => $doc['title'] ?? ''];
+                }
+            }
+            if ($scored) {
+                usort($scored, function ($a, $b) { return $b['score'] <=> $a['score']; });
+                return array_slice($scored, 0, $topK);
+            }
         }
     }
+    // 兜底：关键词检索（零配置可用）
+    return kb_keyword_retrieve($q, $topK);
+}
+
+// 关键词检索：查询切词（整词 + 中文二元组），按命中计分，归一化到 0~1
+function kb_keyword_retrieve($q, $topK = 4) {
+    $kb = load_kb();
+    if (!$kb) return [];
+    $terms = [];
+    $segs = preg_split('/[^\p{L}\p{N}]+/u', (string)$q) ?: [];
+    foreach ($segs as $seg) {
+        $seg = trim($seg);
+        if ($seg === '') continue;
+        if (strlen($seg) <= 12) $terms[] = $seg;
+        $chars = preg_split('//u', $seg, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        for ($i = 0; $i + 1 < count($chars); $i++) {
+            $bi = $chars[$i] . $chars[$i + 1];
+            if (strlen($bi) >= 4) $terms[] = $bi; // 仅中文等宽字符二元组
+        }
+    }
+    $terms = array_values(array_unique($terms));
+    if (!$terms) return [];
+    $scored = [];
+    foreach ($kb as $doc) {
+        foreach (($doc['chunks'] ?? []) as $ch) {
+            $text = $ch['text'] ?? '';
+            if ($text === '') continue;
+            $score = 0.0;
+            foreach ($terms as $t) {
+                $c = substr_count($text, $t);
+                if ($c > 0) $score += 1 + log($c);
+            }
+            if ($score > 0) $scored[] = ['score' => $score, 'text' => $text, 'title' => $doc['title'] ?? ''];
+        }
+    }
+    if (!$scored) return [];
     usort($scored, function ($a, $b) { return $b['score'] <=> $a['score']; });
+    $max = $scored[0]['score'];
+    foreach ($scored as &$s) $s['score'] = $max > 0 ? $s['score'] / $max : 0;
+    unset($s);
     return array_slice($scored, 0, $topK);
 }
 
