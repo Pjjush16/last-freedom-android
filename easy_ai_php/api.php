@@ -1164,6 +1164,78 @@ function build_tool_defs($web, $hasImage, $hasFile, $agent = false) {
             ],'required'=>['filename','content']]
         ]];
     }
+    // 始终可用：翻译、汇率、IP、二维码
+    $tools[] = ['type'=>'function','function'=>[
+        'name'=>'translate','description'=>'翻译文本。指定源语言和目标语言，返回翻译结果。',
+        'parameters'=>['type'=>'object','properties'=>[
+            'text'=>['type'=>'string','description'=>'要翻译的文本'],
+            'target_lang'=>['type'=>'string','description'=>'目标语言代码：zh/en/ja/ko/fr/de/es 等'],
+            'source_lang'=>['type'=>'string','description'=>'源语言代码（可选，留空自动检测）']
+        ],'required'=>['text','target_lang']]
+    ]];
+    $tools[] = ['type'=>'function','function'=>[
+        'name'=>'exchange_rate','description'=>'查询实时汇率。支持任意两种货币之间的兑换。',
+        'parameters'=>['type'=>'object','properties'=>[
+            'from'=>['type'=>'string','description'=>'源货币代码，如 USD/CNY/EUR/JPY'],
+            'to'=>['type'=>'string','description'=>'目标货币代码'],
+            'amount'=>['type'=>'number','description'=>'金额（可选，默认1）']
+        ],'required'=>['from','to']]
+    ]];
+    $tools[] = ['type'=>'function','function'=>[
+        'name'=>'ip_lookup','description'=>'查询 IP 地址的归属地、运营商、时区等信息。',
+        'parameters'=>['type'=>'object','properties'=>[
+            'ip'=>['type'=>'string','description'=>'IP地址（留空查当前服务器公网IP）']
+        ],'required'=>[]]
+    ]];
+    $tools[] = ['type'=>'function','function'=>[
+        'name'=>'qrcode','description'=>'生成二维码图片。输入文本或URL，返回base64编码的PNG图片。',
+        'parameters'=>['type'=>'object','properties'=>[
+            'content'=>['type'=>'string','description'=>'二维码内容（文本或URL）'],
+            'size'=>['type'=>'integer','description'=>'图片尺寸像素（默认300）']
+        ],'required'=>['content']]
+    ]];
+    // Agent 模式扩展：邮件、日程、数据库、Git、截图
+    if ($agent) {
+        $tools[] = ['type'=>'function','function'=>[
+            'name'=>'send_email','description'=>'发送邮件。需要服务器已配置SMTP（data/config.json中的smtp字段）。',
+            'parameters'=>['type'=>'object','properties'=>[
+                'to'=>['type'=>'string','description'=>'收件人邮箱'],
+                'subject'=>['type'=>'string','description'=>'邮件主题'],
+                'body'=>['type'=>'string','description'=>'邮件正文']
+            ],'required'=>['to','subject','body']]
+        ]];
+        $tools[] = ['type'=>'function','function'=>[
+            'name'=>'schedule_reminder','description'=>'创建定时提醒任务。支持一次性和周期性提醒。',
+            'parameters'=>['type'=>'object','properties'=>[
+                'message'=>['type'=>'string','description'=>'提醒内容'],
+                'time'=>['type'=>'string','description'=>'提醒时间，格式 YYYY-MM-DD HH:MM 或 cron表达式'],
+                'repeat'=>['type'=>'string','description'=>'重复规则：once/daily/weekly/monthly（默认once）']
+            ],'required'=>['message','time']]
+        ]];
+        $tools[] = ['type'=>'function','function'=>[
+            'name'=>'db_query','description'=>'执行SQL查询。支持SQLite（默认）和MySQL（需配置）。只允许SELECT查询，禁止写入操作。',
+            'parameters'=>['type'=>'object','properties'=>[
+                'sql'=>['type'=>'string','description'=>'SQL SELECT语句'],
+                'db'=>['type'=>'string','description'=>'数据库名或路径（可选，默认data/app.db）']
+            ],'required'=>['sql']]
+        ]];
+        $tools[] = ['type'=>'function','function'=>[
+            'name'=>'git_op','description'=>'执行Git操作。支持status/log/diff/show/branch/list等只读操作，以及add/commit/pull等写操作。',
+            'parameters'=>['type'=>'object','properties'=>[
+                'command'=>['type'=>'string','description'=>'git子命令：status/log/diff/show/branch/add/commit/pull'],
+                'args'=>['type'=>'string','description'=>'附加参数（可选）'],
+                'repo'=>['type'=>'string','description'=>'仓库路径（可选，默认当前目录）']
+            ],'required'=>['command']]
+        ]];
+        $tools[] = ['type'=>'function','function'=>[
+            'name'=>'screenshot','description'=>'截取网页截图。使用headless Chrome对指定URL截图，返回base64 PNG。',
+            'parameters'=>['type'=>'object','properties'=>[
+                'url'=>['type'=>'string','description'=>'要截图的网页URL'],
+                'width'=>['type'=>'integer','description'=>'视口宽度（默认1280）'],
+                'height'=>['type'=>'integer','description'=>'视口高度（默认720）']
+            ],'required'=>['url']]
+        ]];
+    }
     return $tools;
 }
 
@@ -1179,6 +1251,15 @@ function exec_tool($name, $args, $ctx, &$allSources) {
         case 'baike':     return exec_baike($args);
         case 'code_run':   return exec_code_run($args);
         case 'file_write': return exec_file_write($args);
+        case 'translate':  return exec_translate($args, $ctx);
+        case 'exchange_rate': return exec_exchange_rate($args);
+        case 'ip_lookup':  return exec_ip_lookup($args);
+        case 'qrcode':     return exec_qrcode($args);
+        case 'send_email': return exec_send_email($args, $ctx);
+        case 'schedule_reminder': return exec_schedule_reminder($args);
+        case 'db_query':   return exec_db_query($args);
+        case 'git_op':     return exec_git_op($args);
+        case 'screenshot': return exec_screenshot($args);
         default: return '未知工具：' . $name;
     }
 }
@@ -1298,6 +1379,256 @@ function exec_file_write($args) {
     if (!is_dir($dir)) @mkdir($dir, 0777, true);
     file_put_contents($dir . '/' . $name, $content);
     return '文件已保存：' . $name . '（' . strlen($content) . ' 字节），路径 data/workspace/' . $name;
+}
+
+/* ------------------------------------------------------------------ */
+/* 翻译（优先调翻译API，无配置则回退让模型自己翻）                      */
+/* ------------------------------------------------------------------ */
+function exec_translate($args, $ctx) {
+    $text = (string)($args['text'] ?? '');
+    $target = strtoupper(trim((string)($args['target_lang'] ?? '')));
+    $source = strtoupper(trim((string)($args['source_lang'] ?? '')));
+    if ($text === '' || $target === '') return '请提供要翻译的文本和目标语言。';
+    // 尝试用配置的翻译API（如有）
+    $cfg = $ctx['cfg'] ?? [];
+    $transApi = trim((string)($cfg['translate_api'] ?? ''));
+    $transKey = trim((string)($cfg['translate_key'] ?? ''));
+    if ($transApi !== '' && $transKey !== '') {
+        // 支持 DeepL 格式
+        $payload = ['text' => [$text], 'target_lang' => $target];
+        if ($source !== '') $payload['source_lang'] = $source;
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $transApi,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($payload),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Authorization: DeepL-Auth-Key ' . $transKey],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 15,
+        ]);
+        $resp = curl_exec($ch);
+        curl_close($ch);
+        if ($resp !== false) {
+            $d = json_decode($resp, true);
+            if (isset($d['translations'][0]['text'])) {
+                return "翻译结果（{$target}）：\n" . $d['translations'][0]['text'];
+            }
+        }
+    }
+    // 无翻译API → 提示模型自行翻译
+    return "[未配置翻译API] 请直接翻译以下文本为{$target}：\n{$text}";
+}
+
+/* ------------------------------------------------------------------ */
+/* 汇率查询（exchangerate-api.com 免费）                               */
+/* ------------------------------------------------------------------ */
+function exec_exchange_rate($args) {
+    $from = strtoupper(trim((string)($args['from'] ?? '')));
+    $to = strtoupper(trim((string)($args['to'] ?? '')));
+    $amount = floatval($args['amount'] ?? 1);
+    if ($from === '' || $to === '') return '请提供源货币和目标货币代码。';
+    $url = "https://api.exchangerate-api.com/v4/latest/{$from}";
+    $json = http_get($url, 10);
+    if ($json === '') return '汇率查询失败。';
+    $d = json_decode($json, true);
+    if (!is_array($d) || !isset($d['rates'][$to])) return "未找到 {$from}→{$to} 的汇率。";
+    $rate = floatval($d['rates'][$to]);
+    $result = round($amount * $rate, 4);
+    return "{$amount} {$from} = {$result} {$to}（汇率 1 {$from} = {$rate} {$to}，更新时间 {$d['date']}）";
+}
+
+/* ------------------------------------------------------------------ */
+/* IP 归属地查询（ip-api.com 免费）                                    */
+/* ------------------------------------------------------------------ */
+function exec_ip_lookup($args) {
+    $ip = trim((string)($args['ip'] ?? ''));
+    $url = 'http://ip-api.com/json/' . ($ip !== '' ? urlencode($ip) : '') . '?lang=zh-CN&fields=status,message,country,regionName,city,isp,org,as,query,timezone';
+    $json = http_get($url, 10);
+    if ($json === '') return 'IP查询失败。';
+    $d = json_decode($json, true);
+    if (!is_array($d) || ($d['status'] ?? '') !== 'success') return 'IP查询失败：' . ($d['message'] ?? '未知错误');
+    return sprintf("IP：%s\n国家：%s\n地区：%s %s\n城市：%s\n运营商：%s (%s)\nAS：%s\n时区：%s",
+        $d['query'], $d['country'], $d['regionName'], '', $d['city'],
+        $d['isp'], $d['org'], $d['as'], $d['timezone']);
+}
+
+/* ------------------------------------------------------------------ */
+/* 二维码生成（PHP GD）                                                */
+/* ------------------------------------------------------------------ */
+function exec_qrcode($args) {
+    $content = (string)($args['content'] ?? '');
+    $size = intval($args['size'] ?? 300);
+    if ($content === '') return '请提供二维码内容。';
+    if ($size < 100) $size = 100;
+    if ($size > 1000) $size = 1000;
+    if (!function_exists('imagecreate')) return '服务器缺少GD库，无法生成二维码。';
+    // 使用纯PHP QR码生成（内嵌最小实现）
+    // 简化方案：调用外部API生成
+    $url = 'https://api.qrserver.com/v1/create-qr-code/?size=' . $size . 'x' . $size . '&data=' . urlencode($content);
+    $img = http_get($url, 15);
+    if ($img === '' || strlen($img) < 100) return '二维码生成失败。';
+    $b64 = base64_encode($img);
+    // 保存到workspace
+    $dir = DATA_DIR . '/workspace';
+    if (!is_dir($dir)) @mkdir($dir, 0777, true);
+    $fname = 'qrcode_' . substr(md5($content), 0, 8) . '.png';
+    file_put_contents($dir . '/' . $fname, $img);
+    return "二维码已生成（{$size}x{$size}），已保存为 data/workspace/{$fname}\n![QR](data:image/png;base64," . substr($b64, 0, 200) . "...)";
+}
+
+/* ------------------------------------------------------------------ */
+/* 发送邮件（SMTP）                                                    */
+/* ------------------------------------------------------------------ */
+function exec_send_email($args, $ctx) {
+    $to = trim((string)($args['to'] ?? ''));
+    $subject = trim((string)($args['subject'] ?? ''));
+    $body = (string)($args['body'] ?? '');
+    if ($to === '' || $subject === '' || $body === '') return '收件人、主题、正文都不能为空。';
+    $cfg = $ctx['cfg'] ?? [];
+    $smtpHost = trim((string)($cfg['smtp_host'] ?? ''));
+    $smtpUser = trim((string)($cfg['smtp_user'] ?? ''));
+    $smtpPass = trim((string)($cfg['smtp_pass'] ?? ''));
+    $smtpPort = intval($cfg['smtp_port'] ?? 587);
+    if ($smtpHost === '') return '未配置SMTP服务器。请在设置中添加 smtp_host/smtp_user/smtp_pass。';
+    // 使用PHP mail()或简单SMTP
+    if (function_exists('mail') && $smtpHost === '') {
+        $ok = @mail($to, $subject, $body, 'From: ' . $smtpUser);
+        return $ok ? "邮件已发送至 {$to}" : '邮件发送失败。';
+    }
+    // 简单SMTP发送
+    $sock = @fsockopen($smtpHost, $smtpPort, $errno, $errstr, 10);
+    if (!$sock) return "SMTP连接失败：{$errstr}";
+    $read = function() use ($sock) { return fgets($sock, 512); };
+    $write = function($cmd) use ($sock) { fwrite($sock, $cmd . "\r\n"); };
+    $read(); // 欢迎消息
+    $write('EHLO localhost'); $read();
+    if ($smtpUser !== '') {
+        $write('AUTH LOGIN'); $read();
+        $write(base64_encode($smtpUser)); $read();
+        $write(base64_encode($smtpPass)); $read();
+    }
+    $from = $smtpUser !== '' ? $smtpUser : 'noreply@localhost';
+    $write('MAIL FROM:<' . $from . '>'); $read();
+    $write('RCPT TO:<' . $to . '>'); $read();
+    $write('DATA'); $read();
+    $write("Subject: {$subject}\r\nFrom: {$from}\r\nTo: {$to}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n{$body}\r\n.");
+    $read();
+    $write('QUIT'); $read();
+    fclose($sock);
+    return "邮件已发送至 {$to}";
+}
+
+/* ------------------------------------------------------------------ */
+/* 定时提醒                                                            */
+/* ------------------------------------------------------------------ */
+function exec_schedule_reminder($args) {
+    $msg = trim((string)($args['message'] ?? ''));
+    $time = trim((string)($args['time'] ?? ''));
+    $repeat = trim((string)($args['repeat'] ?? 'once'));
+    if ($msg === '' || $time === '') return '请提供提醒内容和时间。';
+    // 写入本地提醒文件（简易实现）
+    $dir = DATA_DIR . '/reminders';
+    if (!is_dir($dir)) @mkdir($dir, 0777, true);
+    $id = substr(md5(uniqid('', true)), 0, 8);
+    $reminder = [
+        'id' => $id,
+        'message' => $msg,
+        'time' => $time,
+        'repeat' => $repeat,
+        'created_at' => date('Y-m-d H:i:s'),
+        'active' => true,
+    ];
+    file_put_contents($dir . '/' . $id . '.json', json_encode($reminder, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+    return "提醒已创建（ID: {$id}）\n内容：{$msg}\n时间：{$time}\n重复：{$repeat}\n\n注意：需要配合定时任务扫描 data/reminders/ 目录才能触发提醒。";
+}
+
+/* ------------------------------------------------------------------ */
+/* 数据库查询（SQLite，只读SELECT）                                    */
+/* ------------------------------------------------------------------ */
+function exec_db_query($args) {
+    $sql = trim((string)($args['sql'] ?? ''));
+    $dbPath = trim((string)($args['db'] ?? ''));
+    if ($sql === '') return '请提供SQL语句。';
+    // 安全检查：只允许SELECT
+    $upper = strtoupper(preg_replace('/\s+/', ' ', $sql));
+    if (strpos($upper, 'SELECT') !== 0) return '安全限制：仅允许SELECT查询。';
+    $forbidden = ['INSERT', 'UPDATE', 'DELETE', 'DROP', 'ALTER', 'CREATE', 'TRUNCATE', 'EXEC', 'GRANT', 'REVOKE'];
+    foreach ($forbidden as $kw) {
+        if (preg_match('/\b' . $kw . '\b/i', $sql)) return '安全限制：禁止' . $kw . '操作。';
+    }
+    if ($dbPath === '') $dbPath = DATA_DIR . '/app.db';
+    if (!file_exists($dbPath)) return '数据库文件不存在：' . $dbPath;
+    try {
+        $pdo = new PDO('sqlite:' . $dbPath);
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $stmt = $pdo->query($sql);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if (empty($rows)) return '查询结果为空。';
+        $out = "查询返回 " . count($rows) . " 行：\n";
+        // 表格输出
+        $cols = array_keys($rows[0]);
+        $out .= '| ' . implode(' | ', $cols) . " |\n";
+        $out .= '|' . str_repeat('---|', count($cols)) . "\n";
+        foreach (array_slice($rows, 0, 50) as $row) {
+            $vals = [];
+            foreach ($cols as $c) $vals[] = str_replace('|', '\\|', (string)($row[$c] ?? ''));
+            $out .= '| ' . implode(' | ', $vals) . " |\n";
+        }
+        if (count($rows) > 50) $out .= "\n…（仅显示前50行，共" . count($rows) . "行）";
+        return $out;
+    } catch (PDOException $e) {
+        return 'SQL执行失败：' . $e->getMessage();
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Git 操作                                                            */
+/* ------------------------------------------------------------------ */
+function exec_git_op($args) {
+    $cmd = trim((string)($args['command'] ?? ''));
+    $gitArgs = trim((string)($args['args'] ?? ''));
+    $repo = trim((string)($args['repo'] ?? '.'));
+    if ($cmd === '') return '请提供git子命令。';
+    // 白名单
+    $allowed = ['status','log','diff','show','branch','tag','remote','add','commit','pull','fetch','stash','checkout','merge','rebase','cherry-pick','blame','shortlog','describe','ls-files','ls-remote'];
+    if (!in_array($cmd, $allowed, true)) return '不支持的git命令：' . $cmd . '。允许：' . implode(', ', $allowed);
+    // 危险参数过滤
+    if (preg_match('/[;&|`$()]/', $gitArgs)) return '参数包含非法字符。';
+    $fullCmd = 'cd ' . escapeshellarg($repo) . ' && git ' . escapeshellarg($cmd);
+    if ($gitArgs !== '') $fullCmd .= ' ' . $gitArgs;
+    $fullCmd .= ' 2>&1';
+    $output = @shell_exec($fullCmd);
+    if ($output === null) return 'git命令执行失败。';
+    $output = trim($output);
+    if (strlen($output) > 8000) $output = str_cut($output, 8000) . "\n…（输出已截断）";
+    return "git {$cmd} 输出：\n" . ($output !== '' ? $output : '（无输出）');
+}
+
+/* ------------------------------------------------------------------ */
+/* 网页截图（headless Chrome）                                         */
+/* ------------------------------------------------------------------ */
+function exec_screenshot($args) {
+    $url = trim((string)($args['url'] ?? ''));
+    $width = intval($args['width'] ?? 1280);
+    $height = intval($args['height'] ?? 720);
+    if ($url === '') return '请提供URL。';
+    if (!preg_match('#^https?://#i', $url)) return 'URL必须以http://或https://开头。';
+    // 查找Chrome/Chromium
+    $chrome = trim((string)@shell_exec('command -v google-chrome 2>/dev/null || command -v chromium-browser 2>/dev/null || command -v chromium 2>/dev/null'));
+    if ($chrome === '') return '服务器未安装Chrome/Chromium，无法截图。';
+    $dir = DATA_DIR . '/workspace';
+    if (!is_dir($dir)) @mkdir($dir, 0777, true);
+    $outFile = $dir . '/screenshot_' . substr(md5($url . time()), 0, 8) . '.png';
+    $cmd = escapeshellarg($chrome) . ' --headless --disable-gpu --no-sandbox --disable-dev-shm-usage'
+         . ' --window-size=' . $width . ',' . $height
+         . ' --screenshot=' . escapeshellarg($outFile)
+         . ' ' . escapeshellarg($url) . ' 2>&1';
+    $output = @shell_exec($cmd);
+    if (!file_exists($outFile)) return '截图失败：' . trim((string)$output);
+    $size = filesize($outFile);
+    $b64 = base64_encode(file_get_contents($outFile));
+    return "截图成功（{$width}x{$height}，{$size}字节），已保存为 data/workspace/" . basename($outFile)
+         . "\n![screenshot](data:image/png;base64," . substr($b64, 0, 200) . "...)";
 }
 
 /* ------------------------------------------------------------------ */
