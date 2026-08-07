@@ -1235,6 +1235,78 @@ function build_tool_defs($web, $hasImage, $hasFile, $agent = false) {
                 'height'=>['type'=>'integer','description'=>'视口高度（默认720）']
             ],'required'=>['url']]
         ]];
+        // 服务器管理工具
+        $tools[] = ['type'=>'function','function'=>[
+            'name'=>'server_file_list','description'=>'列出服务器指定目录的文件和子目录。支持递归列出。',
+            'parameters'=>['type'=>'object','properties'=>[
+                'path'=>['type'=>'string','description'=>'目录路径（默认当前工作目录）'],
+                'recursive'=>['type'=>'boolean','description'=>'是否递归列出子目录（默认false）'],
+                'pattern'=>['type'=>'string','description'=>'文件名匹配模式（可选，如*.php）']
+            ],'required'=>[]]
+        ]];
+        $tools[] = ['type'=>'function','function'=>[
+            'name'=>'server_file_read','description'=>'读取服务器上的文件内容。支持文本文件和二进制文件（返回base64）。',
+            'parameters'=>['type'=>'object','properties'=>[
+                'path'=>['type'=>'string','description'=>'文件路径'],
+                'max_bytes'=>['type'=>'integer','description'=>'最大读取字节数（默认1MB）']
+            ],'required'=>['path']]
+        ]];
+        $tools[] = ['type'=>'function','function'=>[
+            'name'=>'server_file_write','description'=>'写入或创建服务器上的文件。支持覆盖和追加模式。',
+            'parameters'=>['type'=>'object','properties'=>[
+                'path'=>['type'=>'string','description'=>'文件路径'],
+                'content'=>['type'=>'string','description'=>'文件内容'],
+                'mode'=>['type'=>'string','description'=>'写入模式：overwrite（覆盖，默认）或 append（追加）']
+            ],'required'=>['path','content']]
+        ]];
+        $tools[] = ['type'=>'function','function'=>[
+            'name'=>'server_file_delete','description'=>'删除服务器上的文件或目录。',
+            'parameters'=>['type'=>'object','properties'=>[
+                'path'=>['type'=>'string','description'=>'要删除的文件或目录路径'],
+                'recursive'=>['type'=>'boolean','description'=>'删除目录时是否递归（默认false）']
+            ],'required'=>['path']]
+        ]];
+        $tools[] = ['type'=>'function','function'=>[
+            'name'=>'server_file_move','description'=>'移动或重命名服务器上的文件或目录。',
+            'parameters'=>['type'=>'object','properties'=>[
+                'source'=>['type'=>'string','description'=>'源路径'],
+                'destination'=>['type'=>'string','description'=>'目标路径']
+            ],'required'=>['source','destination']]
+        ]];
+        $tools[] = ['type'=>'function','function'=>[
+            'name'=>'server_info','description'=>'获取服务器系统信息：CPU、内存、磁盘、负载、运行时间等。',
+            'parameters'=>['type'=>'object','properties'=>[],'required'=>[]]
+        ]];
+        $tools[] = ['type'=>'function','function'=>[
+            'name'=>'server_process_list','description'=>'列出服务器上的运行进程。可按名称过滤。',
+            'parameters'=>['type'=>'object','properties'=>[
+                'filter'=>['type'=>'string','description'=>'进程名过滤关键词（可选）'],
+                'limit'=>['type'=>'integer','description'=>'最大返回数量（默认50）']
+            ],'required'=>[]]
+        ]];
+        $tools[] = ['type'=>'function','function'=>[
+            'name'=>'server_service','description'=>'管理系统服务：查看状态、启动、停止、重启。',
+            'parameters'=>['type'=>'object','properties'=>[
+                'action'=>['type'=>'string','description'=>'操作：status/start/stop/restart/list'],
+                'service'=>['type'=>'string','description'=>'服务名称（list时可选）']
+            ],'required'=>['action']]
+        ]];
+        $tools[] = ['type'=>'function','function'=>[
+            'name'=>'server_log','description'=>'查看服务器日志文件。支持tail（最后N行）和grep搜索。',
+            'parameters'=>['type'=>'object','properties'=>[
+                'path'=>['type'=>'string','description'=>'日志文件路径'],
+                'lines'=>['type'=>'integer','description'=>'读取最后N行（默认100）'],
+                'grep'=>['type'=>'string','description'=>'搜索关键词（可选）']
+            ],'required'=>['path']]
+        ]];
+        $tools[] = ['type'=>'function','function'=>[
+            'name'=>'server_network','description'=>'网络诊断工具：ping、DNS查询、端口检测、traceroute。',
+            'parameters'=>['type'=>'object','properties'=>[
+                'tool'=>['type'=>'string','description'=>'工具类型：ping/dns/port/traceroute/curl'],
+                'target'=>['type'=>'string','description'=>'目标主机/IP/域名'],
+                'options'=>['type'=>'string','description'=>'附加选项（如端口号、超时等）']
+            ],'required'=>['tool','target']]
+        ]];
     }
     return $tools;
 }
@@ -1260,6 +1332,16 @@ function exec_tool($name, $args, $ctx, &$allSources) {
         case 'db_query':   return exec_db_query($args);
         case 'git_op':     return exec_git_op($args);
         case 'screenshot': return exec_screenshot($args);
+        case 'server_file_list': return exec_server_file_list($args);
+        case 'server_file_read': return exec_server_file_read($args);
+        case 'server_file_write': return exec_server_file_write($args);
+        case 'server_file_delete': return exec_server_file_delete($args);
+        case 'server_file_move': return exec_server_file_move($args);
+        case 'server_info': return exec_server_info();
+        case 'server_process_list': return exec_server_process_list($args);
+        case 'server_service': return exec_server_service($args);
+        case 'server_log': return exec_server_log($args);
+        case 'server_network': return exec_server_network($args);
         default: return '未知工具：' . $name;
     }
 }
@@ -1629,6 +1711,291 @@ function exec_screenshot($args) {
     $b64 = base64_encode(file_get_contents($outFile));
     return "截图成功（{$width}x{$height}，{$size}字节），已保存为 data/workspace/" . basename($outFile)
          . "\n![screenshot](data:image/png;base64," . substr($b64, 0, 200) . "...)";
+}
+
+/* ------------------------------------------------------------------ */
+/* 服务器文件列表                                                       */
+/* ------------------------------------------------------------------ */
+function exec_server_file_list($args) {
+    $path = trim((string)($args['path'] ?? '.'));
+    $recursive = !empty($args['recursive']);
+    $pattern = trim((string)($args['pattern'] ?? ''));
+    if (!is_dir($path)) return '目录不存在：' . $path;
+    $items = [];
+    if ($recursive) {
+        $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, RecursiveDirectoryIterator::SKIP_DOTS), RecursiveIteratorIterator::SELF_FIRST);
+        foreach ($it as $file) {
+            if ($pattern !== '' && !fnmatch($pattern, $file->getFilename())) continue;
+            $rel = str_replace($path . '/', '', $file->getPathname());
+            $type = $file->isDir() ? 'dir' : 'file';
+            $size = $file->isFile() ? $file->getSize() : 0;
+            $items[] = ['path' => $rel, 'type' => $type, 'size' => $size];
+            if (count($items) >= 500) break;
+        }
+    } else {
+        $entries = @scandir($path);
+        if ($entries === false) return '无法读取目录：' . $path;
+        foreach ($entries as $entry) {
+            if ($entry === '.' || $entry === '..') continue;
+            if ($pattern !== '' && !fnmatch($pattern, $entry)) continue;
+            $full = $path . '/' . $entry;
+            $type = is_dir($full) ? 'dir' : 'file';
+            $size = is_file($full) ? filesize($full) : 0;
+            $items[] = ['path' => $entry, 'type' => $type, 'size' => $size];
+        }
+    }
+    if (empty($items)) return '目录为空。';
+    $out = "目录 {$path} 内容（" . count($items) . " 项）：\n";
+    foreach ($items as $item) {
+        $icon = $item['type'] === 'dir' ? '📁' : '📄';
+        $sizeStr = $item['type'] === 'file' ? ' (' . format_bytes($item['size']) . ')' : '';
+        $out .= $icon . ' ' . $item['path'] . $sizeStr . "\n";
+    }
+    return $out;
+}
+
+function format_bytes($bytes) {
+    if ($bytes < 1024) return $bytes . 'B';
+    if ($bytes < 1048576) return round($bytes / 1024, 1) . 'KB';
+    if ($bytes < 1073741824) return round($bytes / 1048576, 1) . 'MB';
+    return round($bytes / 1073741824, 2) . 'GB';
+}
+
+/* ------------------------------------------------------------------ */
+/* 服务器文件读取                                                       */
+/* ------------------------------------------------------------------ */
+function exec_server_file_read($args) {
+    $path = trim((string)($args['path'] ?? ''));
+    $maxBytes = intval($args['max_bytes'] ?? 1048576); // 默认1MB
+    if ($path === '') return '请提供文件路径。';
+    if (!file_exists($path)) return '文件不存在：' . $path;
+    $size = filesize($path);
+    if ($size > $maxBytes) {
+        $content = file_get_contents($path, false, null, 0, $maxBytes);
+        return "文件 {$path}（" . format_bytes($size) . "，仅读取前 " . format_bytes($maxBytes) . "）：\n" . $content . "\n…（文件过大，已截断）";
+    }
+    // 检测是否为文本文件
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+    $mime = $finfo->file($path);
+    if (strpos($mime, 'text/') === 0 || strpos($mime, 'application/json') === 0 || strpos($mime, 'application/xml') === 0) {
+        $content = file_get_contents($path);
+        return "文件 {$path}（{$mime}，" . format_bytes($size) . "）：\n" . $content;
+    }
+    // 二进制文件返回base64
+    $content = base64_encode(file_get_contents($path));
+    return "文件 {$path}（{$mime}，" . format_bytes($size) . "，base64编码）：\n" . substr($content, 0, 2000) . (strlen($content) > 2000 ? "\n…（已截断）" : '');
+}
+
+/* ------------------------------------------------------------------ */
+/* 服务器文件写入                                                       */
+/* ------------------------------------------------------------------ */
+function exec_server_file_write($args) {
+    $path = trim((string)($args['path'] ?? ''));
+    $content = (string)($args['content'] ?? '');
+    $mode = trim((string)($args['mode'] ?? 'overwrite'));
+    if ($path === '') return '请提供文件路径。';
+    $dir = dirname($path);
+    if (!is_dir($dir)) @mkdir($dir, 0777, true);
+    if ($mode === 'append') {
+        file_put_contents($path, $content, FILE_APPEND);
+        return "已追加到 {$path}（" . strlen($content) . " 字节）";
+    }
+    file_put_contents($path, $content);
+    return "已写入 {$path}（" . strlen($content) . " 字节）";
+}
+
+/* ------------------------------------------------------------------ */
+/* 服务器文件删除                                                       */
+/* ------------------------------------------------------------------ */
+function exec_server_file_delete($args) {
+    $path = trim((string)($args['path'] ?? ''));
+    $recursive = !empty($args['recursive']);
+    if ($path === '') return '请提供路径。';
+    if (!file_exists($path)) return '路径不存在：' . $path;
+    if (is_dir($path)) {
+        if (!$recursive) return '这是目录，需要设置 recursive=true 才能删除。';
+        $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, RecursiveDirectoryIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+        foreach ($it as $file) {
+            if ($file->isDir()) @rmdir($file->getPathname());
+            else @unlink($file->getPathname());
+        }
+        @rmdir($path);
+        return "已递归删除目录：{$path}";
+    }
+    @unlink($path);
+    return "已删除文件：{$path}";
+}
+
+/* ------------------------------------------------------------------ */
+/* 服务器文件移动/重命名                                                */
+/* ------------------------------------------------------------------ */
+function exec_server_file_move($args) {
+    $source = trim((string)($args['source'] ?? ''));
+    $dest = trim((string)($args['destination'] ?? ''));
+    if ($source === '' || $dest === '') return '请提供源路径和目标路径。';
+    if (!file_exists($source)) return '源路径不存在：' . $source;
+    $destDir = dirname($dest);
+    if (!is_dir($destDir)) @mkdir($destDir, 0777, true);
+    if (@rename($source, $dest)) {
+        return "已移动：{$source} → {$dest}";
+    }
+    return "移动失败：{$source} → {$dest}";
+}
+
+/* ------------------------------------------------------------------ */
+/* 服务器系统信息                                                       */
+/* ------------------------------------------------------------------ */
+function exec_server_info() {
+    $info = [];
+    // CPU
+    $cpuInfo = @file_get_contents('/proc/cpuinfo');
+    if ($cpuInfo) {
+        preg_match('/model name\s*:\s*(.+)/', $cpuInfo, $m);
+        $info['cpu'] = trim($m[1] ?? 'unknown');
+        $info['cpu_cores'] = substr_count($cpuInfo, 'processor');
+    }
+    // Memory
+    $memInfo = @file_get_contents('/proc/meminfo');
+    if ($memInfo) {
+        preg_match('/MemTotal:\s+(\d+)/', $memInfo, $mt);
+        preg_match('/MemAvailable:\s+(\d+)/', $memInfo, $ma);
+        $total = intval($mt[1] ?? 0);
+        $avail = intval($ma[1] ?? 0);
+        $info['memory_total'] = format_bytes($total * 1024);
+        $info['memory_available'] = format_bytes($avail * 1024);
+        $info['memory_used_pct'] = $total > 0 ? round(($total - $avail) / $total * 100, 1) . '%' : 'N/A';
+    }
+    // Disk
+    $disk = @disk_free_space('/');
+    $diskTotal = @disk_total_space('/');
+    if ($disk !== false && $diskTotal !== false) {
+        $info['disk_total'] = format_bytes($diskTotal);
+        $info['disk_free'] = format_bytes($disk);
+        $info['disk_used_pct'] = round(($diskTotal - $disk) / $diskTotal * 100, 1) . '%';
+    }
+    // Load average
+    $load = @file_get_contents('/proc/loadavg');
+    if ($load) {
+        $parts = explode(' ', $load);
+        $info['load_avg'] = $parts[0] . ' ' . $parts[1] . ' ' . $parts[2];
+    }
+    // Uptime
+    $uptime = @file_get_contents('/proc/uptime');
+    if ($uptime) {
+        $secs = floatval(explode(' ', $uptime)[0]);
+        $days = floor($secs / 86400);
+        $hours = floor(($secs % 86400) / 3600);
+        $mins = floor(($secs % 3600) / 60);
+        $info['uptime'] = "{$days}天 {$hours}小时 {$mins}分钟";
+    }
+    // OS
+    $os = @file_get_contents('/etc/os-release');
+    if ($os) {
+        preg_match('/PRETTY_NAME="([^"]+)"/', $os, $m);
+        $info['os'] = $m[1] ?? 'Linux';
+    }
+    // Hostname
+    $info['hostname'] = gethostname() ?: 'unknown';
+    
+    $out = "=== 服务器信息 ===\n";
+    foreach ($info as $k => $v) $out .= ucfirst(str_replace('_', ' ', $k)) . ": {$v}\n";
+    return $out;
+}
+
+/* ------------------------------------------------------------------ */
+/* 进程列表                                                             */
+/* ------------------------------------------------------------------ */
+function exec_server_process_list($args) {
+    $filter = trim((string)($args['filter'] ?? ''));
+    $limit = intval($args['limit'] ?? 50);
+    $cmd = 'ps aux --sort=-%mem 2>/dev/null || ps aux';
+    if ($filter !== '') $cmd .= ' | grep -i ' . escapeshellarg($filter);
+    $cmd .= ' | head -' . ($limit + 1); // +1 for header
+    $output = @shell_exec($cmd . ' 2>&1');
+    if ($output === null) return '无法获取进程列表。';
+    $lines = explode("\n", trim($output));
+    if (count($lines) <= 1) return '无匹配进程。';
+    return "进程列表（" . (count($lines) - 1) . " 个）：\n" . implode("\n", array_slice($lines, 0, $limit + 1));
+}
+
+/* ------------------------------------------------------------------ */
+/* 服务管理                                                             */
+/* ------------------------------------------------------------------ */
+function exec_server_service($args) {
+    $action = trim((string)($args['action'] ?? ''));
+    $service = trim((string)($args['service'] ?? ''));
+    $allowed = ['status', 'start', 'stop', 'restart', 'list'];
+    if (!in_array($action, $allowed, true)) return '不支持的操作：' . $action . '。允许：' . implode(', ', $allowed);
+    if ($action === 'list') {
+        $output = @shell_exec('systemctl list-units --type=service --state=running --no-pager 2>/dev/null || service --status-all 2>/dev/null || echo "无法列出服务"');
+        return "运行中的服务：\n" . trim((string)$output);
+    }
+    if ($service === '') return '请提供服务名称。';
+    // 安全检查：只允许字母数字-_
+    if (!preg_match('/^[a-zA-Z0-9_-]+$/', $service)) return '服务名包含非法字符。';
+    $cmd = "systemctl {$action} " . escapeshellarg($service) . " 2>&1";
+    $output = @shell_exec($cmd);
+    if ($output === null) {
+        // fallback to service command
+        $output = @shell_exec("service {$service} {$action} 2>&1");
+    }
+    return "服务 {$service} {$action}：\n" . trim((string)$output);
+}
+
+/* ------------------------------------------------------------------ */
+/* 日志查看                                                             */
+/* ------------------------------------------------------------------ */
+function exec_server_log($args) {
+    $path = trim((string)($args['path'] ?? ''));
+    $lines = intval($args['lines'] ?? 100);
+    $grep = trim((string)($args['grep'] ?? ''));
+    if ($path === '') return '请提供日志文件路径。';
+    if (!file_exists($path)) return '日志文件不存在：' . $path;
+    if ($lines < 1) $lines = 100;
+    if ($lines > 1000) $lines = 1000;
+    $cmd = 'tail -n ' . $lines . ' ' . escapeshellarg($path);
+    if ($grep !== '') $cmd .= ' | grep -i ' . escapeshellarg($grep);
+    $output = @shell_exec($cmd . ' 2>&1');
+    if ($output === null) return '无法读取日志。';
+    return "日志 {$path}（最后 {$lines} 行" . ($grep !== '' ? "，过滤: {$grep}" : '') . "）：\n" . trim($output);
+}
+
+/* ------------------------------------------------------------------ */
+/* 网络诊断                                                             */
+/* ------------------------------------------------------------------ */
+function exec_server_network($args) {
+    $tool = trim((string)($args['tool'] ?? ''));
+    $target = trim((string)($args['target'] ?? ''));
+    $options = trim((string)($args['options'] ?? ''));
+    if ($target === '') return '请提供目标。';
+    // 安全检查
+    if (preg_match('/[;&|`$()]/', $target) || preg_match('/[;&|`$()]/', $options)) return '参数包含非法字符。';
+    $allowed = ['ping', 'dns', 'port', 'traceroute', 'curl'];
+    if (!in_array($tool, $allowed, true)) return '不支持的工具：' . $tool . '。允许：' . implode(', ', $allowed);
+    
+    switch ($tool) {
+        case 'ping':
+            $cmd = 'ping -c 4 -W 3 ' . escapeshellarg($target) . ' 2>&1';
+            break;
+        case 'dns':
+            $cmd = 'nslookup ' . escapeshellarg($target) . ' 2>&1 || dig ' . escapeshellarg($target) . ' 2>&1 || host ' . escapeshellarg($target) . ' 2>&1';
+            break;
+        case 'port':
+            $port = intval($options) ?: 80;
+            $cmd = 'timeout 5 bash -c "echo >/dev/tcp/' . escapeshellarg($target) . '/' . $port . '" 2>&1 && echo "端口 ' . $port . ' 开放" || echo "端口 ' . $port . ' 不可达"';
+            break;
+        case 'traceroute':
+            $cmd = 'traceroute -m 15 -w 2 ' . escapeshellarg($target) . ' 2>&1 || tracepath ' . escapeshellarg($target) . ' 2>&1';
+            break;
+        case 'curl':
+            $cmd = 'curl -sI -m 10 ' . escapeshellarg($target) . ' 2>&1';
+            break;
+        default:
+            return '未知工具。';
+    }
+    $output = @shell_exec($cmd);
+    if ($output === null) return "{$tool} 执行失败。";
+    return "{$tool} {$target} 结果：\n" . trim($output);
 }
 
 /* ------------------------------------------------------------------ */
