@@ -303,6 +303,18 @@ svg.ic{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;strok
 .send-btn svg.ic{width:17px;height:17px}
 .foot-note{text-align:center;color:var(--gray-600);font-size:11.5px;margin-top:8px}
 
+/* ============ 目录树 ============ */
+.ft-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;cursor:pointer;transition:background .12s;font-size:13px}
+.ft-item:hover{background:var(--hover)}
+.ft-item .ft-icon{font-size:16px;width:22px;text-align:center;flex-shrink:0}
+.ft-item .ft-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ft-item .ft-size{font-size:11px;color:var(--gray-500);flex-shrink:0}
+#ftBreadcrumb a{color:var(--accent);cursor:pointer;text-decoration:none}
+#ftBreadcrumb a:hover{text-decoration:underline}
+/* ============ 进度提示 ============ */
+.save-progress{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--accent)}
+.save-progress .spinner{width:14px;height:14px;border:2px solid var(--gray-700);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 /* ============ 设置弹窗 ============ */
 .modal-overlay{
   position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);backdrop-filter:blur(2px);
@@ -602,6 +614,13 @@ body.share-mode .msg-actions{display:none !important}
       <button class="icon-btn" id="btnMenu" title="侧边栏">
         <svg class="ic" viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
       </button>
+      <div class="model-sel" id="agentSel" style="margin-right:4px">
+        <button class="model-btn" id="agentBtn" style="font-size:12.5px;opacity:.7">
+          <span id="agentName">默认</span>
+          <svg class="ic chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="model-menu" id="agentMenu"></div>
+      </div>
       <div class="model-sel" id="modelSel">
         <button class="model-btn" id="modelBtn">
           <span id="modelName">自动模式</span>
@@ -661,6 +680,9 @@ body.share-mode .msg-actions{display:none !important}
             <button class="tool-btn" id="btnShare" title="生成分享链接">
               <svg class="ic" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51l6.83 3.98M15.41 6.51l-6.82 3.98"/></svg>
             </button>
+            <button class="tool-btn" id="btnFileTree" title="浏览服务器文件">
+              <svg class="ic" viewBox="0 0 24 24"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/><path d="M12 11v6M9 14h6"/></svg>
+            </button>
             <button class="tool-btn" id="btnVoice" title="语音输入">
               <svg class="ic" viewBox="0 0 24 24"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg>
             </button>
@@ -715,6 +737,11 @@ body.share-mode .msg-actions{display:none !important}
         <textarea id="kbContent" placeholder="粘贴或导入文档正文…（点「添加到知识库」完成向量化）" style="margin-top:8px"></textarea>
         <button class="btn btn-primary" id="kbAdd" style="margin-top:8px;width:100%">添加到知识库（向量化）</button>
         <div id="kbList" style="margin-top:12px"></div>
+      </section>
+      <section>
+        <h3>自定义模板（Agent）</h3>
+        <div id="agentList"></div>
+        <p class="hint">保存不同提示词模板，在顶部切换使用。保存设置时自动备份旧版本（保留最近10个快照）。</p>
       </section>
       <section id="userMgmtSec" style="display:none">
         <h3>用户管理（管理员）</h3>
@@ -781,6 +808,15 @@ body.share-mode .msg-actions{display:none !important}
 <!-- ======== 右键菜单 ======== -->
 <div class="ctx" id="ctxMenu"></div>
 
+<div class="modal-overlay" id="fileTreeOverlay">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-head"><h2>选择文件</h2><button class="icon-btn" id="ftClose"><svg class="ic" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
+    <div class="modal-body">
+      <div id="ftBreadcrumb" style="font-size:12px;color:var(--gray-400);margin-bottom:8px;word-break:break-all"></div>
+      <div id="ftList" style="max-height:340px;overflow-y:auto"></div>
+    </div>
+  </div>
+</div>
 <div id="toast"></div>
 <input type="file" id="fileInput" multiple accept="image/*,.txt,.md,.csv,.json,.log,.pdf,.docx" style="display:none">
 
@@ -2216,6 +2252,7 @@ function openSettings(){
   $('#cfgEmbedModel').value=CONFIG.embed_model||'';
   $('#cfgEmbedUrl').value=CONFIG.embed_url||'';
   renderProviderCards();
+  renderAgentCards();
   loadKbList();
   if(AUTH&&AUTH.role==='admin')renderUserManager();
   $('#setOverlay').classList.add('open');
@@ -2270,19 +2307,25 @@ async function saveSettings(){
     key:card.querySelector('.p-key').value.trim(),
     model:card.querySelector('.p-model').value.trim()
   }));
+  const agents=(CONFIG.agents||[]).map(a=>({name:a.name||'',prompt:a.prompt||''}));
+  // 进度指示
+  $('#setSave').innerHTML='<span class="save-progress"><span class="spinner"></span>保存中</span>';
+  $('#setSave').disabled=true;
   try{
     const resp=await fetch(API+'?action=config',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({name:$('#cfgName').value.trim(),prompt:$('#cfgPrompt').value.trim(),embed_model:$('#cfgEmbedModel').value.trim(),embed_url:$('#cfgEmbedUrl').value.trim(),providers})
+      body:JSON.stringify({name:$('#cfgName').value.trim(),prompt:$('#cfgPrompt').value.trim(),embed_model:$('#cfgEmbedModel').value.trim(),embed_url:$('#cfgEmbedUrl').value.trim(),providers,agents})
     });
     const d=await resp.json();
     if(d.ok){
-      toast('设置已保存');
+      toast('已保存 · 旧版本已自动备份');
       closeSettings();
       await loadConfig();
+      buildAgentMenu();
     }else toast(d.error||'保存失败');
   }catch(e){toast('保存失败：网络错误')}
+  finally{$('#setSave').textContent='保存';$('#setSave').disabled=false}
 }
 
 /* ==================================================================
@@ -2629,6 +2672,88 @@ $('#btnAgent').addEventListener('click',()=>{
   toast(agentEnabled?'Agent 已开启 · 模型可跑代码和写文件':'Agent 已关闭');
 });
 
+/* ---------- 目录树选择器 ---------- */
+let ftPath='/';
+$('#btnFileTree').addEventListener('click',()=>{ftPath='/';loadFileTree();$('#fileTreeOverlay').classList.add('open')});
+$('#ftClose').addEventListener('click',()=>$('#fileTreeOverlay').classList.remove('open'));
+$('#fileTreeOverlay').addEventListener('click',e=>{if(e.target.id==='fileTreeOverlay')$(e.target).classList.remove('open')});
+async function loadFileTree(){
+  try{
+    const r=await fetch(API+'?action=file_tree&path='+encodeURIComponent(ftPath));
+    const d=await r.json();
+    if(d.error){toast(d.error);return}
+    $('#ftBreadcrumb').innerHTML='<a>📁 /</a> '+ftPath.split('/').filter(Boolean).map((seg,i,arr)=>{
+      const p='/'+arr.slice(0,i+1).join('/');
+      return '<a class="ft-crumb" data-path="'+p+'">'+seg+'</a>';
+    }).join(' / <a>');
+    $('#ftBreadcrumb').querySelectorAll('a').forEach(a=>{a.addEventListener('click',e=>{e.preventDefault();ftPath=a.dataset.path||'/';loadFileTree()})});
+    const list=$('#ftList');list.innerHTML='';
+    if(ftPath!=='/'){list.innerHTML+=`<div class="ft-item" data-path="${ftPath}/.."><span class="ft-icon">📁</span><span class="ft-name">..</span></div>`}
+    (d.items||[]).forEach(i=>{
+      const el=document.createElement('div');
+      el.className='ft-item';
+      el.innerHTML=`<span class="ft-icon">${i.type==='dir'?'📁':'📄'}</span><span class="ft-name">${i.name}</span>${i.type==='file'?'<span class="ft-size">'+fmtSize(i.size||0)+'</span>':''}`;
+      el.addEventListener('click',()=>{
+        if(i.type==='dir'){ftPath=i.path;loadFileTree();return}
+        inputEl.value='分析文件 '+i.path;
+        autoResize();updateInputUI();
+        $('#fileTreeOverlay').classList.remove('open');
+        inputEl.focus();
+      });
+      list.appendChild(el);
+    });
+  }catch(e){toast('读取目录失败')}
+}
+
+/* ---------- 自定义模板（Agent）配置 ---------- */
+let activeAgentId=null;
+function buildAgentMenu(){
+  const menu=$('#agentMenu');menu.innerHTML='';
+  const def=document.createElement('div');
+  def.className='model-item'+(activeAgentId===null?' on':'');
+  def.innerHTML='<div class="nm">默认</div><div class="ds">使用系统提示词</div>';
+  def.addEventListener('click',e=>{e.stopPropagation();activeAgentId=null;syncAgentSelect();menu.parentElement.classList.remove('open')});
+  menu.appendChild(def);
+  (CONFIG.agents||[]).forEach((a,i)=>{
+    const it=document.createElement('div');
+    it.className='model-item'+(activeAgentId===i?' on':'');
+    it.innerHTML=`<div class="nm">${esc(a.name||'模板'+(i+1))}</div><div class="ds">${esc((a.prompt||'').slice(0,40))}</div>`;
+    it.addEventListener('click',e=>{e.stopPropagation();activeAgentId=i;syncAgentSelect();menu.parentElement.classList.remove('open')});
+    menu.appendChild(it);
+  });
+  const add=document.createElement('div');
+  add.className='model-item';add.innerHTML='<div class="nm" style="color:var(--accent)">＋ 新建模板</div><div class="ds">在设置中管理</div>';
+  add.addEventListener('click',()=>{openSettings();menu.parentElement.classList.remove('open')});
+  menu.appendChild(add);
+}
+function syncAgentSelect(){
+  if(activeAgentId!==null&&CONFIG.agents&&CONFIG.agents[activeAgentId]){
+    $('#agentName').textContent=CONFIG.agents[activeAgentId].name||'模板';
+    $('#agentName').style.opacity='1';
+  }else{$('#agentName').textContent='默认';}
+  buildAgentMenu();
+}
+$('#agentBtn').addEventListener('click',e=>{e.stopPropagation();$('#agentSel').classList.toggle('open')});
+
+/* ---------- 保存进度 + 备份 ----------------- */
+function renderAgentCards(){
+  const wrap=$('#agentList');
+  if(!wrap)return;
+  wrap.innerHTML='';
+  (CONFIG.agents||[]).forEach((a,i)=>{
+    const card=document.createElement('div');
+    card.className='provider-card';
+    card.innerHTML=`<div class="pc-title"><span class="pc-name">${esc(a.name||'模板'+(i+1))}</span><button class="pc-del" title="删除">✕</button></div><label>名称</label><input class="a-name" value="${esc(a.name||'')}" placeholder="模板名称"><label>提示词</label><textarea class="a-prompt" style="min-height:60px">${esc(a.prompt||'')}</textarea>`;
+    card.querySelector('.pc-del').addEventListener('click',()=>{CONFIG.agents.splice(i,1);renderAgentCards()});
+    card.querySelector('.a-name').addEventListener('input',()=>{CONFIG.agents[i].name=card.querySelector('.a-name').value});
+    card.querySelector('.a-prompt').addEventListener('input',()=>{CONFIG.agents[i].prompt=card.querySelector('.a-prompt').value});
+    wrap.appendChild(card);
+  });
+  const add=document.createElement('button');
+  add.className='conn-add';add.textContent='＋ 添加模板';add.addEventListener('click',()=>{CONFIG.agents.push({name:'新模板',prompt:'',system_prompt:''});renderAgentCards()});
+  wrap.appendChild(add);
+}
+
 /* ---------- 知识库（RAG）管理 ---------- */
 async function loadKbList(){
   try{
@@ -2887,6 +3012,7 @@ async function initApp(){
     document.querySelectorAll('#messages .markdown').forEach(el=>enhance(el));
   });
   await loadConfig();
+  buildAgentMenu();
   await Promise.all([loadFolders(),loadPrompts(),loadChats()]);
   renderChatList();
   syncWebBtn();

@@ -184,6 +184,7 @@ function default_config() {
         'providers' => [
             ['url' => '', 'key' => '', 'model' => ''],
         ],
+        'agents' => [],
     ];
 }
 
@@ -206,6 +207,7 @@ function load_config() {
     $cfg['providers'] = $ps;
     $cfg['embed_model'] = trim((string)($file['embed_model'] ?? ''));
     $cfg['embed_url'] = trim((string)($file['embed_url'] ?? ''));
+    $cfg['agents'] = (isset($file['agents']) && is_array($file['agents'])) ? $file['agents'] : [];
     return $cfg;
 }
 
@@ -506,6 +508,7 @@ case 'config':
             'prompt' => $cfg['prompt'],
             'embed_model' => $cfg['embed_model'] ?? '',
             'embed_url' => $cfg['embed_url'] ?? '',
+            'agents' => $cfg['agents'] ?? [],
             'providers' => array_map(function ($p) {
                 return ['url' => $p['url'], 'key' => mask_key($p['key']), 'model' => $p['model']];
             }, $cfg['providers']),
@@ -543,6 +546,20 @@ case 'config':
     }
     if (!$ps) $ps = [['url' => '', 'key' => '', 'model' => '']];
     $new['providers'] = $ps;
+    $new['agents'] = (isset($body['agents']) && is_array($body['agents'])) ? array_values($body['agents']) : [];
+    // 自动备份旧版本快照
+    if (is_file(CONFIG_FILE)) {
+        $bakDir = DATA_DIR . '/backups';
+        if (!is_dir($bakDir)) @mkdir($bakDir, 0777, true);
+        $bakName = $bakDir . '/config.bak.' . date('YmdHis') . '.json';
+        @copy(CONFIG_FILE, $bakName);
+        // 只保留最近 10 个备份
+        $baks = glob($bakDir . '/config.bak.*.json') ?: [];
+        if (count($baks) > 10) {
+            usort($baks, function ($a, $b) { return filemtime($b) <=> filemtime($a); });
+            foreach (array_slice($baks, 10) as $old) @unlink($old);
+        }
+    }
     jwrite(CONFIG_FILE, $new);
     json_out(['ok' => true]);
     break;
@@ -900,6 +917,32 @@ case 'websearch':
     $q = trim((string)($_GET['q'] ?? ''));
     if ($q === '') json_err('q 不能为空');
     json_out(['results' => web_search($q, 6)]);
+    break;
+
+/* ---------------- 文件目录树（前端目录选择器） ---------------- */
+case 'file_tree':
+    $path = trim((string)($_GET['path'] ?? '.'));
+    $real = realpath($path);
+    if ($real === false || !is_dir($real)) json_err('目录不存在');
+    $entries = @scandir($real);
+    if ($entries === false) json_err('无法读取目录');
+    $items = [];
+    foreach ($entries as $entry) {
+        if ($entry === '.' || $entry === '..') continue;
+        $full = $real . '/' . $entry;
+        $isDir = is_dir($full);
+        $items[] = [
+            'name' => $entry,
+            'path' => $full,
+            'type' => $isDir ? 'dir' : 'file',
+            'size' => $isDir ? 0 : filesize($full),
+        ];
+    }
+    usort($items, function ($a, $b) {
+        if ($a['type'] !== $b['type']) return $a['type'] === 'dir' ? -1 : 1;
+        return strcasecmp($a['name'], $b['name']);
+    });
+    json_out(['path' => $real, 'items' => $items]);
     break;
 
 /* ---------------- 流式生成 ---------------- */
