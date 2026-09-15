@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Last Freedom Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+        #map {
+            width: 100%;
+            height: 100%;
+            /* 模拟直升机俯拍冷色调 */
+            filter: brightness(0.85) contrast(1.1) saturate(0.7) hue-rotate(10deg);
+        }
+
+        /* 天气效果叠加层 */
+        #weather-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            z-index: 1000;
+            transition: opacity 0.5s;
+            opacity: 0;
+        }
+        #weather-overlay.fog {
+            background: radial-gradient(ellipse at center, transparent 30%, rgba(180,180,180,0.6) 100%);
+            opacity: 1;
+        }
+        #weather-overlay.rain {
+            background: repeating-linear-gradient(
+                transparent,
+                transparent 4px,
+                rgba(150,200,255,0.1) 4px,
+                rgba(150,200,255,0.1) 5px
+            );
+            opacity: 1;
+            animation: rain-fall 0.3s linear infinite;
+        }
+        @keyframes rain-fall {
+            0% { background-position: 0 0; }
+            100% { background-position: 0 20px; }
+        }
+
+        /* 蓝色信息条 */
+        #info-bar {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            background: rgba(0, 60, 140, 0.85);
+            color: white;
+            padding: 8px 16px;
+            font-size: 14px;
+            font-family: monospace;
+            z-index: 1001;
+            text-align: center;
+        }
+
+        /* 黄色警告框 */
+        #warning-box {
+            position: fixed;
+            top: 40px; right: 10px;
+            background: rgba(255, 200, 0, 0.9);
+            color: #333;
+            padding: 6px 10px;
+            font-size: 11px;
+            font-weight: bold;
+            border-radius: 4px;
+            z-index: 1001;
+            line-height: 1.4;
+        }
+
+        /* 威胁圈 CSS 动画 */
+        .threat-circle-pulse {
+            animation: pulse 2s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 0.4; }
+            50% { opacity: 0.7; }
+        }
+    </style>
+</head>
+<body>
+    <div id="info-bar">📍 正在获取位置...</div>
+    <div id="warning-box">安全驾驶<br>请勿超速<br>剧情演绎 游戏画面</div>
+    <div id="weather-overlay"></div>
+    <div id="map"></div>
+
+    <script>
+        // 获取天地图 Key
+        const params = new URLSearchParams(window.location.search);
+        const TK = new URLSearchParams(window.location.search).get('key') || '';
+
+        // 初始化地图
+        const map = L.map('map', {
+            center: [39.9042, 116.4074],  // 默认北京
+            zoom: 16,
+            zoomControl: false,
+            attributionControl: false,
+            dragging: true,
+            tap: true
+        });
+
+        // 天地图卫星影像层
+        const satelliteLayer = L.tileLayer(
+            'https://t{s}.tianditu.gov.cn/img_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0' +
+            '&LAYER=img&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILECOL={x}&TILEROW={y}&TILEMATRIX={z}' +
+            '&tk=' + TK,
+            {
+                subdomains: ['0', '1', '2', '3', '4', '5', '6', '7'],
+                maxZoom: 18
+            }
+        ).addTo(map);
+
+        // 天地图注记层（路名等）
+        const annotationLayer = L.tileLayer(
+            'https://t{s}.tianditu.gov.cn/cia_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0' +
+            '&LAYER=cia&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILECOL={x}&TILEROW={y}&TILEMATRIX={z}' +
+            '&tk=' + TK,
+            {
+                subdomains: ['0', '1', '2', '3', '4', '5', '6', '7'],
+                maxZoom: 18
+            }
+        ).addTo(map);
+
+        // 玩家标记（箭头图标）
+        let playerMarker = null;
+        let playerIcon = L.divIcon({
+            html: '<div style="font-size:32px;transform:rotate(0deg);transition:transform 0.3s;">🔺</div>',
+            className: 'player-icon',
+            iconSize: [40, 40],
+            iconAnchor: [20, 20]
+        });
+
+        // 终点标记
+        let destMarker = null;
+
+        // 威胁圈
+        let threatCircle = null;
+        let threatCircleFog = null;
+
+        // 地图点击事件
+        map.on('click', function(e) {
+            if (window.AndroidBridge) {
+                window.AndroidBridge.onMapClick(e.latlng.lat, e.latlng.lng);
+            }
+        });
+
+        // ============= Android 调用的函数 =============
+
+        function updatePlayer(lat, lng, bearing, speed) {
+            // 更新或创建玩家标记
+            if (!playerMarker) {
+                playerMarker = L.marker([lat, lng], { icon: playerIcon }).addTo(map);
+                map.setView([lat, lng], 17);
+            } else {
+                playerMarker.setLatLng([lat, lng]);
+            }
+
+            // 旋转箭头
+            const arrowEl = playerMarker.getElement();
+            if (arrowEl) {
+                const div = arrowEl.querySelector('div');
+                if (div) div.style.transform = 'rotate(' + bearing + 'deg)';
+            }
+
+            // 地图跟随玩家（平滑移动）
+            map.panTo([lat, lng], { animate: true, duration: 0.5 });
+
+            // 更新信息条
+            document.getElementById('info-bar').textContent =
+                '📍 ' + lat.toFixed(5) + ', ' + lng.toFixed(5) +
+                ' | 🏎️ ' + speed.toFixed(0) + ' km/h';
+
+            // 通知 Android 地图已就绪
+            if (!window._mapReadySent) {
+                window._mapReadySent = true;
+                if (window.AndroidBridge) window.AndroidBridge.onMapReady();
+            }
+        }
+
+        function setDestination(lat, lng) {
+            // 移除旧终点
+            if (destMarker) map.removeLayer(destMarker);
+
+            destMarker = L.marker([lat, lng], {
+                icon: L.divIcon({
+                    html: '<div style="font-size:36px;">🏁</div>',
+                    className: 'dest-icon',
+                    iconSize: [40, 40],
+                    iconAnchor: [20, 20]
+                })
+            }).addTo(map);
+        }
+
+        function updateCircle(centerLat, centerLng, radius, initialRadius) {
+            // 主圈（红色实线）
+            if (threatCircle) map.removeLayer(threatCircle);
+            threatCircle = L.circle([centerLat, centerLng], {
+                radius: radius,
+                color: '#ff3333',
+                weight: 3,
+                fillColor: '#ff0000',
+                fillOpacity: 0.08,
+                className: 'threat-circle-pulse'
+            }).addTo(map);
+
+            // 外圈雾气效果
+            if (threatCircleFog) map.removeLayer(threatCircleFog);
+            const fogRadius = radius * 1.3;
+            threatCircleFog = L.circle([centerLat, centerLng], {
+                radius: fogRadius,
+                color: '#ff0000',
+                weight: 1,
+                fillColor: '#ff0000',
+                fillOpacity: 0.15,
+                dashArray: '5, 10'
+            }).addTo(map);
+        }
+
+        function clearDestination() {
+            if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
+            if (threatCircle) { map.removeLayer(threatCircle); threatCircle = null; }
+            if (threatCircleFog) { map.removeLayer(threatCircleFog); threatCircleFog = null; }
+        }
+
+        function setWeather(type) {
+            const overlay = document.getElementById('weather-overlay');
+            overlay.className = '';
+            if (type === 'fog' || type === 'rain') {
+                overlay.classList.add(type);
+            }
+            // 5秒后自动清除
+            setTimeout(() => { overlay.className = ''; }, 15000);
+        }
+
+        // 地图就绪通知
+        if (window.AndroidBridge) {
+            window.AndroidBridge.onMapReady();
+        }
+    </script>
+</body>
+</html>
