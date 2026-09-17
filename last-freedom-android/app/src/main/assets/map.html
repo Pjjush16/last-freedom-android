@@ -211,7 +211,10 @@
 
     <!-- 地图源选择 -->
     <select id="map-src-select" onchange="switchMapSource()">
-        <option value="arcgis_sat">ArcGIS 卫星影像（全球）</option>
+        <option value="arcgis_sat">ArcGIS World Imagery（最清晰）</option>
+        <option value="arcgis_clarity">ArcGIS Clarity（增强细节）</option>
+        <option value="arcgis_firefly">ArcGIS Firefly（低饱和风格）</option>
+        <option value="arcgis_wayback">ArcGIS Wayback（历史影像）</option>
     </select>
 
     <div id="map"></div>
@@ -230,6 +233,18 @@
         const MAP_SOURCES = {
             arcgis_sat: {
                 url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                subs: [], maxZoom: 18
+            },
+            arcgis_clarity: {
+                url: 'https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                subs: [], maxZoom: 18
+            },
+            arcgis_firefly: {
+                url: 'https://fly.maptiles.arcgis.com/arcgis/rest/services/World_Imagery_Firefly/MapServer/tile/{z}/{y}/{x}',
+                subs: [], maxZoom: 18
+            },
+            arcgis_wayback: {
+                url: 'https://wayback-a.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/10/{z}/{y}/{x}',
                 subs: [], maxZoom: 18
             }
         };
@@ -528,5 +543,7 @@
         // 初始加载坐标
         setTimeout(onMapIdle, 500);
     </script>
+    <!-- Esri 署名 -->
+    <div style="position:fixed;bottom:4px;right:8px;z-index:9999;font-size:9px;color:rgba(255,255,255,0.5);pointer-events:none;">© Esri, Maxar, Earthstar Geographics</div>
 </body>
 </html>
