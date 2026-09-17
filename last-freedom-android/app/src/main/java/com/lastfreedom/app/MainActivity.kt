@@ -116,13 +116,8 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread { subtitleView.setSubtitle(text) }
         }
 
-        // 加载地图
-        val key = prefs.tiandituKey
-        if (key.isEmpty()) {
-            showKeyInputDialog()
-        } else {
-            loadMapWithKey(key)
-        }
+        // 加载地图（ArcGIS 卫星影像，无需 Key）
+        loadMapWithKey("")
     }
 
     private fun loadMapWithKey(key: String) {
@@ -161,39 +156,6 @@ class MainActivity : AppCompatActivity() {
                 mapView.updatePlayerPosition(state.latitude, state.longitude, state.bearing, state.speed)
             }
         }
-    }
-
-    private fun showKeyInputDialog() {
-        val input = android.widget.EditText(this).apply {
-            hint = "输入天地图 Key"
-            setPadding(40, 20, 40, 20)
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle("天地图 Key")
-            .setMessage("请输入你的天地图开发者 Key（首次使用需要）")
-            .setView(input)
-            .setPositiveButton("确定") { _, _ ->
-                val key = input.text.toString().trim()
-                if (key.isNotEmpty()) {
-                    prefs.tiandituKey = key
-                    loadMapWithKey(key)
-                }
-            }
-            .setNeutralButton("如何获取？") { _, _ ->
-                showKeyTutorial()
-            }
-            .setCancelable(false)
-            .show()
-    }
-
-    private fun showKeyTutorial() {
-        val intent = android.content.Intent(
-            android.content.Intent.ACTION_VIEW,
-            android.net.Uri.parse("https://console.tianditu.gov.cn/api/key")
-        )
-        startActivity(intent)
-        showKeyInputDialog()
     }
 
     private fun beginCountdown() {
