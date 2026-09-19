@@ -24,6 +24,8 @@ import kotlin.math.sin
 import kotlin.math.cos
 import kotlin.math.atan2
 import kotlin.math.sqrt
+import kotlin.math.floor
+import org.osmdroid.tileprovider.modules.MapTileModuleProviderBase
 
 class MainActivity : AppCompatActivity() {
 
@@ -74,6 +76,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupMap() {
         // ArcGIS World Imagery 卫星瓦片（全球覆盖，无需 Key）
+        // 关键：maxZoom=19 硬编码在瓦片源中，isTilesScaledToDpi=false
+        // 这样 osmdroid 不会因 DPI 调整而把实际瓦片请求 zoom 推到 21+
         val tileSource = object : XYTileSource(
             "arcgis_world_imagery", 1, 19, 256, ".jpg",
             arrayOf("https://server.arcgisonline.com")
@@ -81,40 +85,39 @@ class MainActivity : AppCompatActivity() {
             override fun getTileURLString(pMapTileIndex: Long): String {
                 val x = org.osmdroid.util.MapTileIndex.getX(pMapTileIndex)
                 val y = org.osmdroid.util.MapTileIndex.getY(pMapTileIndex)
-                val z = org.osmdroid.util.MapTileIndex.getZoom(pMapTileIndex)
+                var z = org.osmdroid.util.MapTileIndex.getZoom(pMapTileIndex)
+                // 保险：即使 MapView 内部 zoom 被 DPI 推到 >19，瓦片 URL 永远不超过 19
+                if (z > 19) z = 19
                 return "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/$z/$y/$x"
             }
         }
 
         map.setTileSource(tileSource)
         map.setMultiTouchControls(true)
-        // DPI 缩放必须开启：osmdroid 依赖此属性在高 DPI 屏幕上正确计算有效 zoom 范围
-        // 关闭它会导致内置的 maxZoomLevel 限制失效（v4.7.0 正常工作的原因）
-        map.isTilesScaledToDpi = true
+        // 关闭 DPI 缩放——这是根因：
+        // isTilesScaledToDpi=true 时，tile size 会被设为 256*density（xxhdpi=768px），
+        // 导致 TileSystem 内部 maxZoom 偏移 +2，用户捏合时可以突破 maxZoomLevel=19
+        // 设为 false 后，tile size 固定 256px，zoom 限制精确匹配瓦片源声明的 19
+        map.isTilesScaledToDpi = false
         map.minZoomLevel = 2.0
         map.maxZoomLevel = 19.0
 
-        // 触摸结束后强制钳制 zoom 到有效范围
-        // 作为 MapController 内置限制的兜底（防止手势绕过的边缘情况）
-        map.setOnTouchListener { _, event ->
-            false // 不消费事件，让 osmdroid 正常处理手势
-        }
+        // 手势结束后兜底钳制（以防万一）
         map.setOnGenericMotionListener { _, event ->
             if (event?.action == android.view.MotionEvent.ACTION_UP ||
                 event?.action == android.view.MotionEvent.ACTION_CANCEL) {
-                // 手势结束后检查并钳制 zoom
                 handler.post {
-                    val z = map.zoomLevel
+                    val z = map.zoomLevelDouble
                     if (z > 19.0) map.controller.setZoom(19.0)
                     else if (z < 2.0) map.controller.setZoom(2.0)
                 }
             }
-            false // 不消费事件
+            false
         }
 
         // 开场：显示整个地球
         map.controller.setZoom(2.0)
-        map.controller.setCenter(GeoPoint(30.0, 110.0)) // 亚太区域居中
+        map.controller.setCenter(GeoPoint(30.0, 110.0))
     }
 
     private fun setupLocationOverlay() {
