@@ -152,6 +152,7 @@ class MainActivity : AppCompatActivity() {
             zoomLocked = !zoomLocked
             if (zoomLocked) {
                 // 锁定：alpha 1.0，显示高亮
+                btnZoomLock.text = "🔒"
                 btnZoomLock.alpha = 1.0f
                 btnZoomLock.setTextColor(0xFF00E5FF.toInt()) // 青蓝高亮
                 // 锁定后重置迟滞状态
@@ -159,6 +160,7 @@ class MainActivity : AppCompatActivity() {
                 pendingZoomStartTime = 0L
             } else {
                 // 解锁：alpha 0.6，恢复正常
+                btnZoomLock.text = "🔓"
                 btnZoomLock.alpha = 0.6f
                 btnZoomLock.setTextColor(0x99FFFFFF.toInt()) // 恢复默认色
                 // 解锁后重新初始化 smoothedZoom 为当前速度对应值
