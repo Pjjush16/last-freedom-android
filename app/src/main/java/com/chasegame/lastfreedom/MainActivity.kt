@@ -233,7 +233,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // === 速度驱动缩放 ===
-        val speedKmh = provider.getSmoothedSpeedKmh().coerceAtLeast(0.0)
+        val speedKmh = provider.getSmoothedSpeedKmh().toDouble().coerceAtLeast(0.0)
         val targetZoom = speedToZoom(speedKmh)
         // EMA 平滑，避免 zoom 跳变
         smoothedZoom = smoothedZoom + zoomAlpha * (targetZoom - smoothedZoom)
