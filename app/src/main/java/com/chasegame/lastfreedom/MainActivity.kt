@@ -88,9 +88,27 @@ class MainActivity : AppCompatActivity() {
 
         map.setTileSource(tileSource)
         map.setMultiTouchControls(true)
-        map.isTilesScaledToDpi = true
+        // 关键：禁用 DPI 缩放，否则在高 DPI 屏幕上用户手势可以放大超过瓦片源的最大 zoom
+        map.isTilesScaledToDpi = false
         map.minZoomLevel = 2.0
+        // ArcGIS World Imagery 全球覆盖最大 zoom = 19
         map.maxZoomLevel = 19.0
+
+        // 缩放边界监听器：任何操作（手势、动画、相机系统）导致 zoom 超限时自动钳回
+        map.addMapListener(object : org.osmdroid.events.MapListener {
+            override fun onScroll(event: org.osmdroid.events.ScrollEvent?): Boolean {
+                return false
+            }
+            override fun onZoom(event: org.osmdroid.events.ZoomEvent?): Boolean {
+                val currentZoom = map.zoomLevel
+                if (currentZoom > 19.0) {
+                    map.controller.setZoom(19.0)
+                } else if (currentZoom < 2.0) {
+                    map.controller.setZoom(2.0)
+                }
+                return false
+            }
+        })
 
         // 开场：显示整个地球
         map.controller.setZoom(2.0)
