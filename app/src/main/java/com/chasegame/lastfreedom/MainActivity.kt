@@ -24,8 +24,6 @@ import kotlin.math.sin
 import kotlin.math.cos
 import kotlin.math.atan2
 import kotlin.math.sqrt
-import kotlin.math.floor
-import org.osmdroid.tileprovider.modules.MapTileModuleProviderBase
 
 class MainActivity : AppCompatActivity() {
 
@@ -76,8 +74,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupMap() {
         // ArcGIS World Imagery 卫星瓦片（全球覆盖，无需 Key）
-        // 关键：maxZoom=19 硬编码在瓦片源中，isTilesScaledToDpi=false
-        // 这样 osmdroid 不会因 DPI 调整而把实际瓦片请求 zoom 推到 21+
+        // 与 v4.7.0 完全一致的 zoom 限制方式：纯靠 osmdroid 内置机制
         val tileSource = object : XYTileSource(
             "arcgis_world_imagery", 1, 19, 256, ".jpg",
             arrayOf("https://server.arcgisonline.com")
@@ -86,7 +83,7 @@ class MainActivity : AppCompatActivity() {
                 val x = org.osmdroid.util.MapTileIndex.getX(pMapTileIndex)
                 val y = org.osmdroid.util.MapTileIndex.getY(pMapTileIndex)
                 var z = org.osmdroid.util.MapTileIndex.getZoom(pMapTileIndex)
-                // 保险：即使 MapView 内部 zoom 被 DPI 推到 >19，瓦片 URL 永远不超过 19
+                // 保险层：即使 osmdroid 内部 zoom 越界，瓦片 URL 永远不超过 19
                 if (z > 19) z = 19
                 return "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/$z/$y/$x"
             }
@@ -94,26 +91,12 @@ class MainActivity : AppCompatActivity() {
 
         map.setTileSource(tileSource)
         map.setMultiTouchControls(true)
-        // 关闭 DPI 缩放——这是根因：
-        // isTilesScaledToDpi=true 时，tile size 会被设为 256*density（xxhdpi=768px），
-        // 导致 TileSystem 内部 maxZoom 偏移 +2，用户捏合时可以突破 maxZoomLevel=19
-        // 设为 false 后，tile size 固定 256px，zoom 限制精确匹配瓦片源声明的 19
-        map.isTilesScaledToDpi = false
-        map.minZoomLevel = 2.0
+        // 与 v4.7.0 完全一致的配置
+        map.isTilesScaledToDpi = true
+        map.minZoomLevel = 3.0
         map.maxZoomLevel = 19.0
-
-        // 手势结束后兜底钳制（以防万一）
-        map.setOnGenericMotionListener { _, event ->
-            if (event?.action == android.view.MotionEvent.ACTION_UP ||
-                event?.action == android.view.MotionEvent.ACTION_CANCEL) {
-                handler.post {
-                    val z = map.zoomLevelDouble
-                    if (z > 19.0) map.controller.setZoom(19.0)
-                    else if (z < 2.0) map.controller.setZoom(2.0)
-                }
-            }
-            false
-        }
+        // 不设置任何自定义 touch listener 或 zoom clamp
+        // osmdroid 内置的 MultiTouchController + setZoomLevel() 会自动处理
 
         // 开场：显示整个地球
         map.controller.setZoom(2.0)
@@ -169,11 +152,6 @@ class MainActivity : AppCompatActivity() {
 
     private val cameraRunnable = object : Runnable {
         override fun run() {
-            // 每帧检查 zoom 是否在有效范围内（兜底所有 zoom 操作）
-            val z = map.zoomLevel
-            if (z > 19.0) map.controller.setZoom(19.0)
-            else if (z < 2.0) map.controller.setZoom(2.0)
-
             when (cameraState) {
                 CameraState.OPENING -> handleOpening()
                 CameraState.FOLLOW -> handleFollow()
