@@ -7,6 +7,8 @@ import android.location.Location
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.animation.AccelerateDecelerateInterpolator
+import android.view.animation.DecelerateInterpolator
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -38,6 +40,19 @@ class MainActivity : AppCompatActivity() {
     private var lastGeoLat = 0.0
     private var lastGeoLng = 0.0
     private var geoRequestPending = false
+
+    // === 三状态相机 ===
+    private enum class CameraState { OPENING, FOLLOW, FLY_TO }
+    private var cameraState = CameraState.OPENING
+    private var lastFollowLat = 0.0
+    private var lastFollowLng = 0.0
+    private var hasLastFollow = false
+
+    // 飞行模式阈值：屏幕像素位移
+    private val flyThresholdPx = 300
+
+    // 开场动画
+    private var openingZoomedTo10 = false
 
     companion object {
         private const val PERM_REQUEST = 100
@@ -74,20 +89,22 @@ class MainActivity : AppCompatActivity() {
         map.setTileSource(tileSource)
         map.setMultiTouchControls(true)
         map.isTilesScaledToDpi = true
-        map.minZoomLevel = 3.0
+        map.minZoomLevel = 2.0
         map.maxZoomLevel = 19.0
-        map.controller.setZoom(16.0)
-        map.controller.setCenter(GeoPoint(39.9042, 116.4074)) // 默认北京
+
+        // 开场：显示整个地球
+        map.controller.setZoom(2.0)
+        map.controller.setCenter(GeoPoint(30.0, 110.0)) // 亚太区域居中
     }
 
     private fun setupLocationOverlay() {
-        // 使用插值定位提供者：60fps 平滑位置 + EMA 平滑方向
         val provider = InterpolatedLocationProvider(this)
         interpolatedProvider = provider
 
         locationOverlay = MyLocationNewOverlay(provider, map).apply {
             enableMyLocation()
-            enableFollowLocation()
+            // 禁用 osmdroid 内置跟随，由三状态相机系统接管
+            disableFollowLocation()
             isDrawAccuracyEnabled = true
         }
         map.overlays.add(locationOverlay)
@@ -121,9 +138,178 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("MissingPermission")
     private fun onPermissionGranted() {
         setupLocationOverlay()
-
-        // 启动 HUD 更新循环
         startHudUpdater()
+        startCameraSystem()
+    }
+
+    // === 三状态相机系统 ===
+
+    private val cameraRunnable = object : Runnable {
+        override fun run() {
+            when (cameraState) {
+                CameraState.OPENING -> handleOpening()
+                CameraState.FOLLOW -> handleFollow()
+                CameraState.FLY_TO -> { /* 飞行动画自行运行，这里不干预 */ }
+            }
+            handler.postDelayed(this, 50) // 20Hz 相机更新
+        }
+    }
+
+    private fun startCameraSystem() {
+        handler.post(cameraRunnable)
+    }
+
+    /**
+     * 开场状态：等待 GPS 定位，然后逐渐放大到用户当前位置
+     * 1. 显示整个地球（zoom 2）
+     * 2. GPS 定位后 → 1.5s 飞到 zoom 10
+     * 3. 再 1.2s 飞到 zoom 17
+     * 4. 切换到 FOLLOW 状态
+     */
+    private fun handleOpening() {
+        val provider = interpolatedProvider ?: return
+        if (!provider.hasGpsFix()) return
+
+        val loc = provider.lastKnownLocation ?: return
+        val lat = loc.latitude
+        val lng = loc.longitude
+
+        if (!openingZoomedTo10) {
+            // 阶段 1：1.5s 飞到 zoom 10
+            openingZoomedTo10 = true
+            map.controller.animateTo(GeoPoint(lat, lng), 10.0, 1500L)
+
+            // 阶段 2：1.2s 飞到 zoom 17，然后进入 FOLLOW
+            handler.postDelayed({
+                map.controller.animateTo(GeoPoint(lat, lng), 17.0, 1200L)
+                handler.postDelayed({
+                    cameraState = CameraState.FOLLOW
+                    // 重置跟随基准，避免触发飞行
+                    lastFollowLat = lat
+                    lastFollowLng = lng
+                    hasLastFollow = true
+                }, 1300)
+            }, 1600)
+        }
+    }
+
+    /**
+     * 跟随状态：
+     * - 目标在视野内，相机平滑跟随
+     * - 单次位移超过阈值（屏幕像素），不进跟随，直接进飞行态
+     */
+    private fun handleFollow() {
+        val provider = interpolatedProvider ?: return
+        if (!provider.hasGpsFix()) return
+
+        val loc = provider.lastKnownLocation ?: return
+        val lat = loc.latitude
+        val lng = loc.longitude
+
+        if (!hasLastFollow) {
+            lastFollowLat = lat
+            lastFollowLng = lng
+            hasLastFollow = true
+            map.controller.setCenter(GeoPoint(lat, lng))
+            return
+        }
+
+        val distM = haversine(lastFollowLat, lastFollowLng, lat, lng)
+
+        if (distM > 5.0) {
+            // 换算成屏幕像素位移
+            val zoom = map.zoomLevel
+            val metersPerPixel = 156543.03392 * cos(Math.toRadians(lat)) / Math.pow(2.0, zoom)
+            val screenPx = (distM / metersPerPixel).toInt()
+
+            if (screenPx > flyThresholdPx) {
+                // 超阈值 → 进入飞行态
+                startFlyAnimation(lat, lng)
+                return
+            }
+
+            // 正常跟随
+            map.controller.animateTo(GeoPoint(lat, lng))
+            lastFollowLat = lat
+            lastFollowLng = lng
+        }
+    }
+
+    /**
+     * 飞行态：拉高 → 平移 → 落下，走一条可控曲线
+     * 用户看到的是"飞机飞过去了"，而不是"画面抽过去了"
+     */
+    private var flyRunnable: Runnable? = null
+
+    private fun startFlyAnimation(destLat: Double, destLng: Double) {
+        cameraState = CameraState.FLY_TO
+
+        val startLat = lastFollowLat
+        val startLng = lastFollowLng
+        val startZoom = map.zoomLevel
+
+        // 飞行中间 zoom：距离越远 zoom 越低（看到更多全局视图）
+        val distM = haversine(startLat, startLng, destLat, destLng)
+        val midZoom = when {
+            distM > 10000 -> 12.0
+            distM > 5000 -> 13.0
+            distM > 2000 -> 14.0
+            else -> 15.0
+        }
+
+        val totalDurationMs = 2000L
+        val startTime = System.currentTimeMillis()
+
+        // 取消上一个飞行动画（如果有）
+        flyRunnable?.let { handler.removeCallbacks(it) }
+
+        flyRunnable = object : Runnable {
+            override fun run() {
+                val elapsed = System.currentTimeMillis() - startTime
+                val progress = (elapsed.toFloat() / totalDurationMs).coerceIn(0f, 1f)
+
+                // 位置：easeInOutCubic 插值
+                val t = easeInOutCubic(progress)
+                val curLat = startLat + (destLat - startLat) * t
+                val curLng = startLng + (destLng - startLng) * t
+
+                // Zoom：前半拉到 midZoom，后半恢复到 startZoom
+                val curZoom = if (progress < 0.5f) {
+                    val zt = easeInOutCubic(progress * 2)
+                    startZoom + (midZoom - startZoom) * zt
+                } else {
+                    val zt = easeInOutCubic((progress - 0.5f) * 2)
+                    midZoom + (startZoom - midZoom) * zt
+                }
+
+                map.controller.setCenter(GeoPoint(curLat, curLng))
+                map.controller.setZoom(curZoom)
+
+                if (progress < 1.0f) {
+                    handler.postDelayed(this, 16)
+                } else {
+                    // 飞行完成 → 回到跟随
+                    cameraState = CameraState.FOLLOW
+                    lastFollowLat = destLat
+                    lastFollowLng = destLng
+                }
+            }
+        }
+
+        flyRunnable?.let { handler.post(it) }
+    }
+
+    // === 缓动函数 ===
+
+    private fun easeInOutCubic(t: Float): Double {
+        val td = t.toDouble()
+        return if (td < 0.5) 4.0 * td * td * td
+        else 1.0 - Math.pow(-2.0 * td + 2.0, 3.0) / 2.0
+    }
+
+    private fun easeOutCubic(t: Float): Double {
+        val td = t.toDouble()
+        return 1.0 - Math.pow(1.0 - td, 3.0)
     }
 
     // === HUD 更新（速度 + 路名） ===
@@ -132,51 +318,31 @@ class MainActivity : AppCompatActivity() {
 
     private val hudRunnable = object : Runnable {
         override fun run() {
-            currentLocation?.let { loc ->
-                // 速度 (km/h)
-                if (loc.hasSpeed()) {
-                    val speedKmh = (loc.speed * 3.6).toInt()
-                    tvSpeed.text = speedKmh.toString()
-                }
+            val provider = interpolatedProvider
 
-                // 逆地理编码（每 50m 请求一次）
-                if (!geoRequestPending) {
-                    val dist = haversine(lastGeoLat, lastGeoLng, loc.latitude, loc.longitude)
-                    if (dist > GEO_MIN_DISTANCE || lastGeoLat == 0.0) {
-                        geoRequestPending = true
-                        lastGeoLat = loc.latitude
-                        lastGeoLng = loc.longitude
-                        reverseGeocode(loc.latitude, loc.longitude)
-                    }
+            // 速度：直接从插值引擎读取平滑后的 km/h 值
+            if (provider != null) {
+                val speedKmh = provider.getSmoothedSpeedKmh().toInt()
+                tvSpeed.text = speedKmh.toString()
+            }
+
+            // 逆地理编码（每 50m 请求一次）
+            val loc = provider?.lastKnownLocation
+            if (loc != null && !geoRequestPending) {
+                val dist = haversine(lastGeoLat, lastGeoLng, loc.latitude, loc.longitude)
+                if (dist > GEO_MIN_DISTANCE || lastGeoLat == 0.0) {
+                    geoRequestPending = true
+                    lastGeoLat = loc.latitude
+                    lastGeoLng = loc.longitude
+                    reverseGeocode(loc.latitude, loc.longitude)
                 }
             }
-            handler.postDelayed(this, 500) // HUD 2Hz 足够
+
+            handler.postDelayed(this, 500) // HUD 2Hz
         }
     }
 
     private fun startHudUpdater() {
-        // 监听插值提供者的位置更新
-        interpolatedProvider?.let { provider ->
-            // MyLocationNewOverlay 已经在接收插值位置了
-            // 我们通过 overlay 获取最新位置
-            val locationCheckRunnable = object : Runnable {
-                override fun run() {
-                    currentLocation = locationOverlay.myLocation?.let { geo ->
-                        Location("interpolated").apply {
-                            latitude = geo.latitude
-                            longitude = geo.longitude
-                            // 从 provider 获取速度和方向
-                            provider.lastKnownLocation?.let { loc ->
-                                if (loc.hasSpeed()) speed = loc.speed
-                                if (loc.hasBearing()) bearing = loc.bearing
-                            }
-                        }
-                    }
-                    handler.postDelayed(this, 100)
-                }
-            }
-            handler.post(locationCheckRunnable)
-        }
         handler.post(hudRunnable)
     }
 
@@ -187,7 +353,7 @@ class MainActivity : AppCompatActivity() {
                 val url = URL("https://nominatim.openstreetmap.org/reverse?lat=$lat&lon=$lng&format=json&zoom=18&addressdetails=1")
                 val conn = url.openConnection() as HttpURLConnection
                 conn.requestMethod = "GET"
-                conn.setRequestProperty("User-Agent", "LastFreedom/4.7")
+                conn.setRequestProperty("User-Agent", "LastFreedom/5.0")
                 conn.connectTimeout = 5000
                 conn.readTimeout = 5000
 
@@ -204,7 +370,7 @@ class MainActivity : AppCompatActivity() {
                         tvRoad.text = roadName.uppercase()
                     }
                 }
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 // 网络错误静默处理
             } finally {
                 handler.post { geoRequestPending = false }
