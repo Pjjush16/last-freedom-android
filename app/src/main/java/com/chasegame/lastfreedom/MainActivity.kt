@@ -54,6 +54,15 @@ class MainActivity : AppCompatActivity() {
     // 开场动画
     private var openingZoomedTo10 = false
 
+    // === 速度驱动缩放 ===
+    // 低速(0 km/h) → zoom 18（街道细节）
+    // 中速(60 km/h) → zoom 16
+    // 高速(120 km/h) → zoom 14（高速全局视图）
+    // 超高速(160+ km/h) → zoom 13
+    private var smoothedZoom = 17.0   // EMA 平滑后的目标 zoom
+    private val zoomAlpha = 0.08       // EMA 平滑系数（越小越平滑，避免频繁跳 zoom）
+    private var lastZoomSetTime = 0L   // 上次实际调用 setZoom 的时间
+
     companion object {
         private const val PERM_REQUEST = 100
         private const val GEO_MIN_DISTANCE = 50.0 // 每移动 50m 更新一次路名
@@ -190,6 +199,8 @@ class MainActivity : AppCompatActivity() {
                 map.controller.animateTo(GeoPoint(lat, lng), 17.0, 1200L)
                 handler.postDelayed({
                     cameraState = CameraState.FOLLOW
+                    // 初始化速度缩放基准为当前 zoom，避免跳变
+                    smoothedZoom = 17.0
                     // 重置跟随基准，避免触发飞行
                     lastFollowLat = lat
                     lastFollowLng = lng
@@ -203,6 +214,7 @@ class MainActivity : AppCompatActivity() {
      * 跟随状态：
      * - 目标在视野内，相机平滑跟随
      * - 单次位移超过阈值（屏幕像素），不进跟随，直接进飞行态
+     * - 速度驱动缩放：低速放大，高速缩小
      */
     private fun handleFollow() {
         val provider = interpolatedProvider ?: return
@@ -220,6 +232,22 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        // === 速度驱动缩放 ===
+        val speedKmh = provider.getSmoothedSpeedKmh().coerceAtLeast(0.0)
+        val targetZoom = speedToZoom(speedKmh)
+        // EMA 平滑，避免 zoom 跳变
+        smoothedZoom = smoothedZoom + zoomAlpha * (targetZoom - smoothedZoom)
+        // 限制 zoom 范围
+        val clampedZoom = smoothedZoom.coerceIn(3.0, 18.0)
+        // 只有变化超过 0.1 且距离上次 setZoom 超过 500ms 才实际调整（避免频繁触发）
+        val currentZoom = map.zoomLevelDouble
+        val now = System.currentTimeMillis()
+        if (kotlin.math.abs(clampedZoom - currentZoom) > 0.15 && now - lastZoomSetTime > 500) {
+            // 用 animateTo 做平滑 zoom 过渡（800ms 缓动）
+            map.controller.animateTo(GeoPoint(lat, lng), clampedZoom, 800L)
+            lastZoomSetTime = now
+        }
+
         val distM = haversine(lastFollowLat, lastFollowLng, lat, lng)
 
         if (distM > 5.0) {
@@ -234,10 +262,33 @@ class MainActivity : AppCompatActivity() {
                 return
             }
 
-            // 正常跟随
-            map.controller.animateTo(GeoPoint(lat, lng))
+            // 正常跟随（只在 zoom 没在动画中时）
+            if (now - lastZoomSetTime > 900) {
+                map.controller.animateTo(GeoPoint(lat, lng))
+            }
             lastFollowLat = lat
             lastFollowLng = lng
+        }
+    }
+
+    /**
+     * 速度 → zoom 映射
+     * 0 km/h → zoom 18（停车看街道细节）
+     * 30 km/h → zoom 17（城市低速）
+     * 60 km/h → zoom 16（城市快速路）
+     * 90 km/h → zoom 15（国道/省道）
+     * 120 km/h → zoom 14（高速公路）
+     * 160+ km/h → zoom 13（超高速全局视图）
+     */
+    private fun speedToZoom(speedKmh: Double): Double {
+        return when {
+            speedKmh <= 0 -> 18.0
+            speedKmh <= 30 -> 18.0 - (speedKmh / 30.0) * 1.0   // 18→17
+            speedKmh <= 60 -> 17.0 - ((speedKmh - 30) / 30.0) * 1.0  // 17→16
+            speedKmh <= 90 -> 16.0 - ((speedKmh - 60) / 30.0) * 1.0  // 16→15
+            speedKmh <= 120 -> 15.0 - ((speedKmh - 90) / 30.0) * 1.0 // 15→14
+            speedKmh <= 160 -> 14.0 - ((speedKmh - 120) / 40.0) * 1.0 // 14→13
+            else -> 13.0
         }
     }
 
