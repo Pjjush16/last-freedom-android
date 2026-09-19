@@ -1,0 +1,5 @@
+-keep class org.osmdroid.** { *; }
+-keep class com.chasegame.lastfreedom.** { *; }
+-dontwarn org.osmdroid.**
+-dontwarn okhttp3.**
+-dontwarn okio.**
