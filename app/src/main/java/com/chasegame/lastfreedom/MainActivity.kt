@@ -7,8 +7,9 @@ import android.location.Location
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.animation.AccelerateDecelerateInterpolator
-import android.view.animation.DecelerateInterpolator
+import android.view.MotionEvent
+import android.view.View
+import android.widget.ImageButton
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -23,6 +24,7 @@ import org.json.JSONObject
 import kotlin.math.sin
 import kotlin.math.cos
 import kotlin.math.atan2
+import kotlin.math.abs
 import kotlin.math.sqrt
 
 class MainActivity : AppCompatActivity() {
@@ -55,17 +57,27 @@ class MainActivity : AppCompatActivity() {
     private var openingZoomedTo10 = false
 
     // === 速度驱动缩放 ===
-    // 低速(0 km/h) → zoom 18（街道细节）
-    // 中速(60 km/h) → zoom 16
-    // 高速(120 km/h) → zoom 14（高速全局视图）
-    // 超高速(160+ km/h) → zoom 13
-    private var smoothedZoom = 17.0   // EMA 平滑后的目标 zoom
-    private val zoomAlpha = 0.08       // EMA 平滑系数（越小越平滑，避免频繁跳 zoom）
-    private var lastZoomSetTime = 0L   // 上次实际调用 setZoom 的时间
+    private var smoothedZoom = 17.0
+    private val zoomAlpha = 0.08
+    private var lastZoomSetTime = 0L
+
+    // === 用户交互检测：暂停自动缩放 ===
+    private var lastUserTouchTime = 0L
+    private val AUTO_ZOOM_RESUME_DELAY_MS = 10_000L  // 用户停止操作后 10 秒恢复自动缩放
+
+    // === 缩放锁定按钮 ===
+    private var zoomLocked = false
+    private lateinit var btnZoomLock: ImageButton
+
+    // === 速度→缩放迟滞（死区）===
+    // zoom 变化需要速度持续 3 秒超过/低于阈值才执行，避免阈值边界"喘气"
+    private var pendingZoomChange: Double = -1.0        // 待执行的目标 zoom（-1 = 无待执行）
+    private var pendingZoomStartTime = 0L               // 速度首次越过阈值的时间
+    private val HYSTERESIS_DURATION_MS = 3_000L         // 持续 3 秒才执行
 
     companion object {
         private const val PERM_REQUEST = 100
-        private const val GEO_MIN_DISTANCE = 50.0 // 每移动 50m 更新一次路名
+        private const val GEO_MIN_DISTANCE = 50.0
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -78,12 +90,11 @@ class MainActivity : AppCompatActivity() {
         tvRoad = findViewById(R.id.tvRoad)
 
         setupMap()
+        setupZoomControls()
         requestPermissions()
     }
 
     private fun setupMap() {
-        // ArcGIS World Imagery 卫星瓦片（全球覆盖，无需 Key）
-        // 与 v4.7.0 完全一致的 zoom 限制方式：纯靠 osmdroid 内置机制
         val tileSource = object : XYTileSource(
             "arcgis_world_imagery", 1, 18, 256, ".jpg",
             arrayOf("https://server.arcgisonline.com")
@@ -92,7 +103,6 @@ class MainActivity : AppCompatActivity() {
                 val x = org.osmdroid.util.MapTileIndex.getX(pMapTileIndex)
                 val y = org.osmdroid.util.MapTileIndex.getY(pMapTileIndex)
                 var z = org.osmdroid.util.MapTileIndex.getZoom(pMapTileIndex)
-                // 保险层：即使 osmdroid 内部 zoom 越界，瓦片 URL 永远不超过 19
                 if (z > 18) z = 18
                 return "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/$z/$y/$x"
             }
@@ -100,16 +110,61 @@ class MainActivity : AppCompatActivity() {
 
         map.setTileSource(tileSource)
         map.setMultiTouchControls(true)
-        // 与 v4.7.0 完全一致的配置
         map.isTilesScaledToDpi = true
         map.minZoomLevel = 3.0
         map.maxZoomLevel = 18.0
-        // 不设置任何自定义 touch listener 或 zoom clamp
-        // osmdroid 内置的 MultiTouchController + setZoomLevel() 会自动处理
+
+        // 检测用户触摸，暂停自动缩放
+        map.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                    lastUserTouchTime = System.currentTimeMillis()
+                }
+            }
+            false // 不消费事件，让 osmdroid 继续处理
+        }
 
         // 开场：显示整个地球
         map.controller.setZoom(2.0)
         map.controller.setCenter(GeoPoint(30.0, 110.0))
+    }
+
+    /**
+     * 缩放控制按钮：+ / 锁定 / -
+     */
+    private fun setupZoomControls() {
+        btnZoomLock = findViewById(R.id.btnZoomLock)
+
+        findViewById<ImageButton>(R.id.btnZoomIn).setOnClickListener {
+            lastUserTouchTime = System.currentTimeMillis()
+            val newZoom = (map.zoomLevelDouble + 1.0).coerceAtMost(18.0)
+            map.controller.animateTo(map.mapCenter as GeoPoint, newZoom, 300L)
+        }
+
+        findViewById<ImageButton>(R.id.btnZoomOut).setOnClickListener {
+            lastUserTouchTime = System.currentTimeMillis()
+            val newZoom = (map.zoomLevelDouble - 1.0).coerceAtLeast(3.0)
+            map.controller.animateTo(map.mapCenter as GeoPoint, newZoom, 300L)
+        }
+
+        btnZoomLock.setOnClickListener {
+            zoomLocked = !zoomLocked
+            if (zoomLocked) {
+                // 锁定：alpha 1.0，显示高亮
+                btnZoomLock.alpha = 1.0f
+                btnZoomLock.setColorFilter(0xFF00E5FF.toInt()) // 青蓝高亮
+                // 锁定后重置迟滞状态
+                pendingZoomChange = -1.0
+                pendingZoomStartTime = 0L
+            } else {
+                // 解锁：alpha 0.6，恢复正常
+                btnZoomLock.alpha = 0.6f
+                btnZoomLock.clearColorFilter()
+                // 解锁后重新初始化 smoothedZoom 为当前速度对应值
+                val speedKmh = interpolatedProvider?.getSmoothedSpeedKmh()?.toDouble()?.coerceAtLeast(0.0) ?: 0.0
+                smoothedZoom = speedToZoom(speedKmh)
+            }
+        }
     }
 
     private fun setupLocationOverlay() {
@@ -118,7 +173,6 @@ class MainActivity : AppCompatActivity() {
 
         locationOverlay = MyLocationNewOverlay(provider, map).apply {
             enableMyLocation()
-            // 禁用 osmdroid 内置跟随，由三状态相机系统接管
             disableFollowLocation()
             isDrawAccuracyEnabled = true
         }
@@ -164,9 +218,9 @@ class MainActivity : AppCompatActivity() {
             when (cameraState) {
                 CameraState.OPENING -> handleOpening()
                 CameraState.FOLLOW -> handleFollow()
-                CameraState.FLY_TO -> { /* 飞行动画自行运行，这里不干预 */ }
+                CameraState.FLY_TO -> { /* 飞行动画自行运行 */ }
             }
-            handler.postDelayed(this, 50) // 20Hz 相机更新
+            handler.postDelayed(this, 50)
         }
     }
 
@@ -174,12 +228,6 @@ class MainActivity : AppCompatActivity() {
         handler.post(cameraRunnable)
     }
 
-    /**
-     * 开场状态：等待 GPS 定位，然后根据当前速度直接飞到对应的 zoom
-     * 1. 显示整个地球（zoom 2）
-     * 2. GPS 定位后 → 1.5s 飞到 zoom 10（全局概览）
-     * 3. 再 1.2s 飞到速度驱动的目标 zoom，然后进入 FOLLOW
-     */
     private fun handleOpening() {
         val provider = interpolatedProvider ?: return
         if (!provider.hasGpsFix()) return
@@ -190,20 +238,15 @@ class MainActivity : AppCompatActivity() {
 
         if (!openingZoomedTo10) {
             openingZoomedTo10 = true
-
-            // 阶段 1：1.5s 飞到 zoom 10，让用户看到全局
             map.controller.animateTo(GeoPoint(lat, lng), 10.0, 1500L)
 
-            // 阶段 2：根据当前速度算出目标 zoom，直接飞过去（不再固定 17）
             handler.postDelayed({
                 val speedKmh = provider.getSmoothedSpeedKmh().toDouble().coerceAtLeast(0.0)
                 val targetZoom = speedToZoom(speedKmh)
                 map.controller.animateTo(GeoPoint(lat, lng), targetZoom, 1200L)
                 handler.postDelayed({
                     cameraState = CameraState.FOLLOW
-                    // 初始化速度缩放基准为算出的目标 zoom，避免跳变
                     smoothedZoom = targetZoom
-                    // 重置跟随基准，避免触发飞行
                     lastFollowLat = lat
                     lastFollowLng = lng
                     hasLastFollow = true
@@ -214,9 +257,11 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * 跟随状态：
-     * - 目标在视野内，相机平滑跟随
-     * - 单次位移超过阈值（屏幕像素），不进跟随，直接进飞行态
-     * - 速度驱动缩放：低速放大，高速缩小
+     * - 位置始终跟随（不受锁定影响）
+     * - zoom 自动缩放受三个条件控制：
+     *   1. 用户触摸 → 暂停，10 秒后恢复
+     *   2. 锁定按钮 → 完全禁止自动缩放
+     *   3. 迟滞死区 → 速度需持续 3 秒越过阈值才执行
      */
     private fun handleFollow() {
         val provider = interpolatedProvider ?: return
@@ -234,37 +279,54 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        // === 速度驱动缩放 ===
-        val speedKmh = provider.getSmoothedSpeedKmh().toDouble().coerceAtLeast(0.0)
-        val targetZoom = speedToZoom(speedKmh)
-        // EMA 平滑，避免 zoom 跳变
-        smoothedZoom = smoothedZoom + zoomAlpha * (targetZoom - smoothedZoom)
-        // 限制 zoom 范围
-        val clampedZoom = smoothedZoom.coerceIn(3.0, 18.0)
-        // 只有变化超过 0.1 且距离上次 setZoom 超过 500ms 才实际调整（避免频繁触发）
-        val currentZoom = map.zoomLevelDouble
         val now = System.currentTimeMillis()
-        if (kotlin.math.abs(clampedZoom - currentZoom) > 0.15 && now - lastZoomSetTime > 500) {
-            // 用 animateTo 做平滑 zoom 过渡（800ms 缓动）
-            map.controller.animateTo(GeoPoint(lat, lng), clampedZoom, 800L)
-            lastZoomSetTime = now
+
+        // === 速度驱动缩放（仅在未锁定 且 用户未操作时）===
+        val userRecentlyTouched = (now - lastUserTouchTime) < AUTO_ZOOM_RESUME_DELAY_MS
+
+        if (!zoomLocked && !userRecentlyTouched) {
+            val speedKmh = provider.getSmoothedSpeedKmh().toDouble().coerceAtLeast(0.0)
+            val targetZoom = speedToZoom(speedKmh).coerceIn(3.0, 18.0)
+
+            // 迟滞逻辑：目标 zoom 变化时开始计时，持续 3 秒才执行
+            if (abs(targetZoom - pendingZoomChange) > 0.3) {
+                // 目标变了（或首次），开始/重设计时器
+                pendingZoomChange = targetZoom
+                pendingZoomStartTime = now
+            }
+
+            if (pendingZoomChange >= 0 && (now - pendingZoomStartTime) >= HYSTERESIS_DURATION_MS) {
+                // 3 秒已过，执行缩放
+                smoothedZoom = pendingZoomChange
+                pendingZoomChange = -1.0
+                pendingZoomStartTime = 0L
+            }
+
+            // EMA 平滑 + 实际设置
+            val currentZoom = map.zoomLevelDouble
+            if (abs(smoothedZoom - currentZoom) > 0.15 && now - lastZoomSetTime > 500) {
+                map.controller.animateTo(GeoPoint(lat, lng), smoothedZoom.coerceIn(3.0, 18.0), 800L)
+                lastZoomSetTime = now
+            }
+        } else {
+            // 用户操作中或锁定中：重置迟滞计时器
+            pendingZoomChange = -1.0
+            pendingZoomStartTime = 0L
         }
 
+        // === 位置跟随（始终执行，不受锁定影响）===
         val distM = haversine(lastFollowLat, lastFollowLng, lat, lng)
 
         if (distM > 5.0) {
-            // 换算成屏幕像素位移
             val zoom = map.zoomLevel.toDouble()
             val metersPerPixel = 156543.03392 * cos(Math.toRadians(lat)) / Math.pow(2.0, zoom.toDouble())
             val screenPx = (distM / metersPerPixel).toInt()
 
             if (screenPx > flyThresholdPx) {
-                // 超阈值 → 进入飞行态
                 startFlyAnimation(lat, lng)
                 return
             }
 
-            // 正常跟随（只在 zoom 没在动画中时）
             if (now - lastZoomSetTime > 900) {
                 map.controller.animateTo(GeoPoint(lat, lng))
             }
@@ -273,31 +335,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * 速度 → zoom 映射
-     * 0 km/h → zoom 18（停车看街道细节）
-     * 30 km/h → zoom 17（城市低速）
-     * 60 km/h → zoom 16（城市快速路）
-     * 90 km/h → zoom 15（国道/省道）
-     * 120 km/h → zoom 14（高速公路）
-     * 160+ km/h → zoom 13（超高速全局视图）
-     */
     private fun speedToZoom(speedKmh: Double): Double {
         return when {
             speedKmh <= 0 -> 18.0
-            speedKmh <= 30 -> 18.0 - (speedKmh / 30.0) * 1.0   // 18→17
-            speedKmh <= 60 -> 17.0 - ((speedKmh - 30) / 30.0) * 1.0  // 17→16
-            speedKmh <= 90 -> 16.0 - ((speedKmh - 60) / 30.0) * 1.0  // 16→15
-            speedKmh <= 120 -> 15.0 - ((speedKmh - 90) / 30.0) * 1.0 // 15→14
-            speedKmh <= 160 -> 14.0 - ((speedKmh - 120) / 40.0) * 1.0 // 14→13
+            speedKmh <= 30 -> 18.0 - (speedKmh / 30.0) * 1.0
+            speedKmh <= 60 -> 17.0 - ((speedKmh - 30) / 30.0) * 1.0
+            speedKmh <= 90 -> 16.0 - ((speedKmh - 60) / 30.0) * 1.0
+            speedKmh <= 120 -> 15.0 - ((speedKmh - 90) / 30.0) * 1.0
+            speedKmh <= 160 -> 14.0 - ((speedKmh - 120) / 40.0) * 1.0
             else -> 13.0
         }
     }
 
-    /**
-     * 飞行态：拉高 → 平移 → 落下，走一条可控曲线
-     * 用户看到的是"飞机飞过去了"，而不是"画面抽过去了"
-     */
     private var flyRunnable: Runnable? = null
 
     private fun startFlyAnimation(destLat: Double, destLng: Double) {
@@ -307,7 +356,6 @@ class MainActivity : AppCompatActivity() {
         val startLng = lastFollowLng
         val startZoom = map.zoomLevelDouble
 
-        // 飞行中间 zoom：距离越远 zoom 越低（看到更多全局视图）
         val distM = haversine(startLat, startLng, destLat, destLng)
         val midZoom = when {
             distM > 10000 -> 12.0
@@ -319,7 +367,6 @@ class MainActivity : AppCompatActivity() {
         val totalDurationMs = 2000L
         val startTime = System.currentTimeMillis()
 
-        // 取消上一个飞行动画（如果有）
         flyRunnable?.let { handler.removeCallbacks(it) }
 
         flyRunnable = object : Runnable {
@@ -327,19 +374,16 @@ class MainActivity : AppCompatActivity() {
                 val elapsed = System.currentTimeMillis() - startTime
                 val progress = (elapsed.toFloat() / totalDurationMs).coerceIn(0f, 1f)
 
-                // 位置：easeInOutCubic 插值
                 val t = easeInOutCubic(progress)
                 val curLat = startLat + (destLat - startLat) * t
                 val curLng = startLng + (destLng - startLng) * t
 
-                // Zoom：前半拉到 midZoom，后半恢复到速度驱动的目标 zoom
                 val curZoom = if (progress < 0.5f) {
                     val zt = easeInOutCubic(progress * 2)
                     startZoom + (midZoom - startZoom) * zt
                 } else {
-                    // 实时读取当前速度，算出落地 zoom（不固定为起飞 zoom）
                     val speedKmh = interpolatedProvider?.getSmoothedSpeedKmh()?.toDouble()?.coerceAtLeast(0.0) ?: 0.0
-                    val landingZoom = speedToZoom(speedKmh).coerceIn(3.0, 18.0)
+                    val landingZoom = if (zoomLocked) startZoom else speedToZoom(speedKmh).coerceIn(3.0, 18.0)
                     val zt = easeInOutCubic((progress - 0.5f) * 2)
                     midZoom + (landingZoom - midZoom) * zt
                 }
@@ -350,12 +394,13 @@ class MainActivity : AppCompatActivity() {
                 if (progress < 1.0f) {
                     handler.postDelayed(this, 16)
                 } else {
-                    // 飞行完成 → 回到跟随，同步 smoothedZoom 到当前速度 zoom
                     cameraState = CameraState.FOLLOW
                     lastFollowLat = destLat
                     lastFollowLng = destLng
-                    val speedKmh = interpolatedProvider?.getSmoothedSpeedKmh()?.toDouble()?.coerceAtLeast(0.0) ?: 0.0
-                    smoothedZoom = speedToZoom(speedKmh)
+                    if (!zoomLocked) {
+                        val speedKmh = interpolatedProvider?.getSmoothedSpeedKmh()?.toDouble()?.coerceAtLeast(0.0) ?: 0.0
+                        smoothedZoom = speedToZoom(speedKmh)
+                    }
                 }
             }
         }
@@ -376,7 +421,7 @@ class MainActivity : AppCompatActivity() {
         return 1.0 - Math.pow(1.0 - td, 3.0)
     }
 
-    // === HUD 更新（速度 + 路名） ===
+    // === HUD 更新 ===
 
     private var currentLocation: Location? = null
 
@@ -384,13 +429,11 @@ class MainActivity : AppCompatActivity() {
         override fun run() {
             val provider = interpolatedProvider
 
-            // 速度：直接从插值引擎读取平滑后的 km/h 值
             if (provider != null) {
                 val speedKmh = provider.getSmoothedSpeedKmh().toInt()
                 tvSpeed.text = speedKmh.toString()
             }
 
-            // 逆地理编码（每 50m 请求一次）
             val loc = provider?.lastKnownLocation
             if (loc != null && !geoRequestPending) {
                 val dist = haversine(lastGeoLat, lastGeoLng, loc.latitude, loc.longitude)
@@ -402,7 +445,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            handler.postDelayed(this, 500) // HUD 2Hz
+            handler.postDelayed(this, 500)
         }
     }
 
@@ -410,7 +453,6 @@ class MainActivity : AppCompatActivity() {
         handler.post(hudRunnable)
     }
 
-    /** Nominatim 逆地理编码：坐标 → 路名 */
     private fun reverseGeocode(lat: Double, lng: Double) {
         Thread {
             try {
@@ -435,7 +477,6 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             } catch (_: Exception) {
-                // 网络错误静默处理
             } finally {
                 handler.post { geoRequestPending = false }
             }
