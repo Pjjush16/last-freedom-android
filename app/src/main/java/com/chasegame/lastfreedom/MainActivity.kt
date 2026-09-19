@@ -175,11 +175,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 开场状态：等待 GPS 定位，然后逐渐放大到用户当前位置
+     * 开场状态：等待 GPS 定位，然后根据当前速度直接飞到对应的 zoom
      * 1. 显示整个地球（zoom 2）
-     * 2. GPS 定位后 → 1.5s 飞到 zoom 10
-     * 3. 再 1.2s 飞到 zoom 17
-     * 4. 切换到 FOLLOW 状态
+     * 2. GPS 定位后 → 1.5s 飞到 zoom 10（全局概览）
+     * 3. 再 1.2s 飞到速度驱动的目标 zoom，然后进入 FOLLOW
      */
     private fun handleOpening() {
         val provider = interpolatedProvider ?: return
@@ -190,17 +189,20 @@ class MainActivity : AppCompatActivity() {
         val lng = loc.longitude
 
         if (!openingZoomedTo10) {
-            // 阶段 1：1.5s 飞到 zoom 10
             openingZoomedTo10 = true
+
+            // 阶段 1：1.5s 飞到 zoom 10，让用户看到全局
             map.controller.animateTo(GeoPoint(lat, lng), 10.0, 1500L)
 
-            // 阶段 2：1.2s 飞到 zoom 17，然后进入 FOLLOW
+            // 阶段 2：根据当前速度算出目标 zoom，直接飞过去（不再固定 17）
             handler.postDelayed({
-                map.controller.animateTo(GeoPoint(lat, lng), 17.0, 1200L)
+                val speedKmh = provider.getSmoothedSpeedKmh().toDouble().coerceAtLeast(0.0)
+                val targetZoom = speedToZoom(speedKmh)
+                map.controller.animateTo(GeoPoint(lat, lng), targetZoom, 1200L)
                 handler.postDelayed({
                     cameraState = CameraState.FOLLOW
-                    // 初始化速度缩放基准为当前 zoom，避免跳变
-                    smoothedZoom = 17.0
+                    // 初始化速度缩放基准为算出的目标 zoom，避免跳变
+                    smoothedZoom = targetZoom
                     // 重置跟随基准，避免触发飞行
                     lastFollowLat = lat
                     lastFollowLng = lng
@@ -303,7 +305,7 @@ class MainActivity : AppCompatActivity() {
 
         val startLat = lastFollowLat
         val startLng = lastFollowLng
-        val startZoom = map.zoomLevel.toDouble()
+        val startZoom = map.zoomLevelDouble
 
         // 飞行中间 zoom：距离越远 zoom 越低（看到更多全局视图）
         val distM = haversine(startLat, startLng, destLat, destLng)
@@ -330,13 +332,16 @@ class MainActivity : AppCompatActivity() {
                 val curLat = startLat + (destLat - startLat) * t
                 val curLng = startLng + (destLng - startLng) * t
 
-                // Zoom：前半拉到 midZoom，后半恢复到 startZoom
+                // Zoom：前半拉到 midZoom，后半恢复到速度驱动的目标 zoom
                 val curZoom = if (progress < 0.5f) {
                     val zt = easeInOutCubic(progress * 2)
                     startZoom + (midZoom - startZoom) * zt
                 } else {
+                    // 实时读取当前速度，算出落地 zoom（不固定为起飞 zoom）
+                    val speedKmh = interpolatedProvider?.getSmoothedSpeedKmh()?.toDouble()?.coerceAtLeast(0.0) ?: 0.0
+                    val landingZoom = speedToZoom(speedKmh).coerceIn(3.0, 18.0)
                     val zt = easeInOutCubic((progress - 0.5f) * 2)
-                    midZoom + (startZoom - midZoom) * zt
+                    midZoom + (landingZoom - midZoom) * zt
                 }
 
                 map.controller.setCenter(GeoPoint(curLat, curLng))
@@ -345,10 +350,12 @@ class MainActivity : AppCompatActivity() {
                 if (progress < 1.0f) {
                     handler.postDelayed(this, 16)
                 } else {
-                    // 飞行完成 → 回到跟随
+                    // 飞行完成 → 回到跟随，同步 smoothedZoom 到当前速度 zoom
                     cameraState = CameraState.FOLLOW
                     lastFollowLat = destLat
                     lastFollowLng = destLng
+                    val speedKmh = interpolatedProvider?.getSmoothedSpeedKmh()?.toDouble()?.coerceAtLeast(0.0) ?: 0.0
+                    smoothedZoom = speedToZoom(speedKmh)
                 }
             }
         }
