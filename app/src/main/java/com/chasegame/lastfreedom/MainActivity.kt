@@ -9,7 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
-import android.widget.ImageButton
+import android.widget.TextView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -67,7 +67,7 @@ class MainActivity : AppCompatActivity() {
 
     // === 缩放锁定按钮 ===
     private var zoomLocked = false
-    private lateinit var btnZoomLock: ImageButton
+    private lateinit var btnZoomLock: TextView
 
     // === 速度→缩放迟滞（死区）===
     // zoom 变化需要速度持续 3 秒超过/低于阈值才执行，避免阈值边界"喘气"
@@ -137,13 +137,13 @@ class MainActivity : AppCompatActivity() {
     private fun setupZoomControls() {
         btnZoomLock = findViewById(R.id.btnZoomLock)
 
-        findViewById<ImageButton>(R.id.btnZoomIn).setOnClickListener {
+        findViewById<TextView>(R.id.btnZoomIn).setOnClickListener {
             lastUserTouchTime = System.currentTimeMillis()
             val newZoom = (map.zoomLevelDouble + 1.0).coerceAtMost(18.0)
             map.controller.animateTo(map.mapCenter as GeoPoint, newZoom, 300L)
         }
 
-        findViewById<ImageButton>(R.id.btnZoomOut).setOnClickListener {
+        findViewById<TextView>(R.id.btnZoomOut).setOnClickListener {
             lastUserTouchTime = System.currentTimeMillis()
             val newZoom = (map.zoomLevelDouble - 1.0).coerceAtLeast(3.0)
             map.controller.animateTo(map.mapCenter as GeoPoint, newZoom, 300L)
@@ -154,14 +154,14 @@ class MainActivity : AppCompatActivity() {
             if (zoomLocked) {
                 // 锁定：alpha 1.0，显示高亮
                 btnZoomLock.alpha = 1.0f
-                btnZoomLock.setColorFilter(0xFF00E5FF.toInt()) // 青蓝高亮
+                btnZoomLock.setTextColor(0xFF00E5FF.toInt()) // 青蓝高亮
                 // 锁定后重置迟滞状态
                 pendingZoomChange = -1.0
                 pendingZoomStartTime = 0L
             } else {
                 // 解锁：alpha 0.6，恢复正常
                 btnZoomLock.alpha = 0.6f
-                btnZoomLock.clearColorFilter()
+                btnZoomLock.setTextColor(0x99FFFFFF.toInt()) // 恢复默认色
                 // 解锁后重新初始化 smoothedZoom 为当前速度对应值
                 val speedKmh = interpolatedProvider?.getSmoothedSpeedKmh()?.toDouble()?.coerceAtLeast(0.0) ?: 0.0
                 smoothedZoom = speedToZoom(speedKmh)
