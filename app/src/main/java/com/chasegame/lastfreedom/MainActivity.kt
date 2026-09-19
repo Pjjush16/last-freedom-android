@@ -76,7 +76,7 @@ class MainActivity : AppCompatActivity() {
         // ArcGIS World Imagery 卫星瓦片（全球覆盖，无需 Key）
         // 与 v4.7.0 完全一致的 zoom 限制方式：纯靠 osmdroid 内置机制
         val tileSource = object : XYTileSource(
-            "arcgis_world_imagery", 1, 19, 256, ".jpg",
+            "arcgis_world_imagery", 1, 18, 256, ".jpg",
             arrayOf("https://server.arcgisonline.com")
         ) {
             override fun getTileURLString(pMapTileIndex: Long): String {
@@ -84,7 +84,7 @@ class MainActivity : AppCompatActivity() {
                 val y = org.osmdroid.util.MapTileIndex.getY(pMapTileIndex)
                 var z = org.osmdroid.util.MapTileIndex.getZoom(pMapTileIndex)
                 // 保险层：即使 osmdroid 内部 zoom 越界，瓦片 URL 永远不超过 19
-                if (z > 19) z = 19
+                if (z > 18) z = 18
                 return "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/$z/$y/$x"
             }
         }
@@ -94,7 +94,7 @@ class MainActivity : AppCompatActivity() {
         // 与 v4.7.0 完全一致的配置
         map.isTilesScaledToDpi = true
         map.minZoomLevel = 3.0
-        map.maxZoomLevel = 19.0
+        map.maxZoomLevel = 18.0
         // 不设置任何自定义 touch listener 或 zoom clamp
         // osmdroid 内置的 MultiTouchController + setZoomLevel() 会自动处理
 
