@@ -88,27 +88,29 @@ class MainActivity : AppCompatActivity() {
 
         map.setTileSource(tileSource)
         map.setMultiTouchControls(true)
-        // 关键：禁用 DPI 缩放，否则在高 DPI 屏幕上用户手势可以放大超过瓦片源的最大 zoom
-        map.isTilesScaledToDpi = false
+        // DPI 缩放必须开启：osmdroid 依赖此属性在高 DPI 屏幕上正确计算有效 zoom 范围
+        // 关闭它会导致内置的 maxZoomLevel 限制失效（v4.7.0 正常工作的原因）
+        map.isTilesScaledToDpi = true
         map.minZoomLevel = 2.0
-        // ArcGIS World Imagery 全球覆盖最大 zoom = 19
         map.maxZoomLevel = 19.0
 
-        // 缩放边界监听器：任何操作（手势、动画、相机系统）导致 zoom 超限时自动钳回
-        map.addMapListener(object : org.osmdroid.events.MapListener {
-            override fun onScroll(event: org.osmdroid.events.ScrollEvent?): Boolean {
-                return false
-            }
-            override fun onZoom(event: org.osmdroid.events.ZoomEvent?): Boolean {
-                val currentZoom = map.zoomLevel
-                if (currentZoom > 19.0) {
-                    map.controller.setZoom(19.0)
-                } else if (currentZoom < 2.0) {
-                    map.controller.setZoom(2.0)
+        // 触摸结束后强制钳制 zoom 到有效范围
+        // 作为 MapController 内置限制的兜底（防止手势绕过的边缘情况）
+        map.setOnTouchListener { _, event ->
+            false // 不消费事件，让 osmdroid 正常处理手势
+        }
+        map.setOnGenericMotionListener { _, event ->
+            if (event?.action == android.view.MotionEvent.ACTION_UP ||
+                event?.action == android.view.MotionEvent.ACTION_CANCEL) {
+                // 手势结束后检查并钳制 zoom
+                handler.post {
+                    val z = map.zoomLevel
+                    if (z > 19.0) map.controller.setZoom(19.0)
+                    else if (z < 2.0) map.controller.setZoom(2.0)
                 }
-                return false
             }
-        })
+            false // 不消费事件
+        }
 
         // 开场：显示整个地球
         map.controller.setZoom(2.0)
@@ -164,6 +166,11 @@ class MainActivity : AppCompatActivity() {
 
     private val cameraRunnable = object : Runnable {
         override fun run() {
+            // 每帧检查 zoom 是否在有效范围内（兜底所有 zoom 操作）
+            val z = map.zoomLevel
+            if (z > 19.0) map.controller.setZoom(19.0)
+            else if (z < 2.0) map.controller.setZoom(2.0)
+
             when (cameraState) {
                 CameraState.OPENING -> handleOpening()
                 CameraState.FOLLOW -> handleFollow()
