@@ -218,8 +218,8 @@ class MainActivity : AppCompatActivity() {
 
         if (distM > 5.0) {
             // 换算成屏幕像素位移
-            val zoom = map.zoomLevel
-            val metersPerPixel = 156543.03392 * cos(Math.toRadians(lat)) / Math.pow(2.0, zoom)
+            val zoom = map.zoomLevel.toDouble()
+            val metersPerPixel = 156543.03392 * cos(Math.toRadians(lat)) / Math.pow(2.0, zoom.toDouble())
             val screenPx = (distM / metersPerPixel).toInt()
 
             if (screenPx > flyThresholdPx) {
@@ -246,7 +246,7 @@ class MainActivity : AppCompatActivity() {
 
         val startLat = lastFollowLat
         val startLng = lastFollowLng
-        val startZoom = map.zoomLevel
+        val startZoom = map.zoomLevel.toDouble()
 
         // 飞行中间 zoom：距离越远 zoom 越低（看到更多全局视图）
         val distM = haversine(startLat, startLng, destLat, destLng)
