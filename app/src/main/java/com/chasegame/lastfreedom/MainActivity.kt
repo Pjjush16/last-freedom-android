@@ -113,6 +113,8 @@ class MainActivity : AppCompatActivity() {
         map.isTilesScaledToDpi = true
         map.minZoomLevel = 3.0
         map.maxZoomLevel = 18.0
+        // 禁用 osmdroid 内置缩放控件，使用自定义按钮
+        map.setBuiltInZoomControls(false)
 
         // 检测用户触摸，暂停自动缩放
         map.setOnTouchListener { _, event ->
