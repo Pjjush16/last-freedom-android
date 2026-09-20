@@ -90,16 +90,15 @@
             android:maxWidth="260dp" />
     </LinearLayout>
 
-    <!-- 右下角缩放控制面板：+ 锁定 - -->
+    <!-- 底部居中缩放控制面板：+ 锁定 - -->
     <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom|end"
-        android:layout_marginEnd="16dp"
-        android:layout_marginBottom="80dp"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="40dp"
         android:background="@drawable/panel_bg"
         android:gravity="center"
-        android:orientation="vertical"
+        android:orientation="horizontal"
         android:padding="4dp">
 
         <TextView
@@ -115,8 +114,8 @@
             android:textStyle="bold" />
 
         <View
-            android:layout_width="36dp"
-            android:layout_height="1dp"
+            android:layout_width="1dp"
+            android:layout_height="36dp"
             android:background="#33FFFFFF" />
 
         <TextView
@@ -133,8 +132,8 @@
             android:alpha="0.6" />
 
         <View
-            android:layout_width="36dp"
-            android:layout_height="1dp"
+            android:layout_width="1dp"
+            android:layout_height="36dp"
             android:background="#33FFFFFF" />
 
         <TextView
