@@ -51,6 +51,12 @@ class RoadOverlayManager(
             }
             map.invalidate()
         }
+        // 动态调整路网线宽：zoom 18 → 15f，zoom 13 → 0f（线性插值）
+        if (isVisible) {
+            val strokeW = ((zoom - MIN_ZOOM_FOR_ROADS) / (18.0 - MIN_ZOOM_FOR_ROADS) * 15.0f).coerceIn(1f, 15f)
+            roadPolylines.forEach { it.outlinePaint.strokeWidth = strokeW }
+            map.invalidate()
+        }
     }
 
     // === 显示/隐藏路网叠加 ===
