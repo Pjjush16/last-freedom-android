@@ -10,6 +10,24 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <!-- 左上角数据来源署名 -->
+    <TextView
+        android:id="@+id/tvAttribution"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_marginStart="8dp"
+        android:layout_marginTop="8dp"
+        android:background="#80000000"
+        android:paddingStart="6dp"
+        android:paddingTop="3dp"
+        android:paddingEnd="6dp"
+        android:paddingBottom="3dp"
+        android:text="© OpenStreetMap contributors"
+        android:textColor="#FFFFFF"
+        android:textSize="9sp"
+        android:alpha="0.7" />
+
     <!-- 右上角速度表 -->
     <LinearLayout
         android:layout_width="wrap_content"

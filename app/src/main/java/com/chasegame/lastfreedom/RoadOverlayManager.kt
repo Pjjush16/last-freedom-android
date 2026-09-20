@@ -27,6 +27,10 @@ class RoadOverlayManager(
     private var lastQueryLng = 0.0
     private var queryInProgress = false
 
+    // 区域缓存：按 1km x 1km 网格缓存路网数据
+    private val regionCache = mutableMapOf<String, List<List<GeoPoint>>>()
+    private val CACHE_GRID_SIZE_M = 1000.0  // 1km 网格
+
     // 查询半径（米）
     private val queryRadiusM = 800.0
     // 最小移动距离才重新查询（米）
@@ -83,13 +87,28 @@ class RoadOverlayManager(
 
     fun isVisible() = isVisible
 
-    // === 查询路网数据 ===
+    // === 查询路网数据（带区域缓存）===
 
     fun updateForPosition(lat: Double, lng: Double) {
         if (queryInProgress) return
 
+        // 计算当前网格坐标
+        val gridKey = getGridKey(lat, lng)
+
+        // 检查区域缓存
+        val cachedForRegion = regionCache[gridKey]
+        if (cachedForRegion != null) {
+            // 命中缓存，直接使用
+            if (cachedRoads !== cachedForRegion) {
+                cachedRoads = cachedForRegion
+                updateRoadPolylines(cachedRoads)
+            }
+            return
+        }
+
+        // 未命中缓存，检查距离阈值（避免频繁查询）
         val dist = haversine(lastQueryLat, lastQueryLng, lat, lng)
-        if (cachedRoads.isNotEmpty() && dist < reQueryDistanceM) return
+        if (dist < reQueryDistanceM && cachedRoads.isNotEmpty()) return
 
         queryInProgress = true
         lastQueryLat = lat
@@ -99,6 +118,9 @@ class RoadOverlayManager(
             try {
                 val roads = queryOverpassRoads(lat, lng, queryRadiusM)
                 handler.post {
+                    // 存入区域缓存
+                    regionCache[gridKey] = roads
+                    cachedRoads = roads
                     updateRoadPolylines(roads)
                     queryInProgress = false
                 }
@@ -106,6 +128,15 @@ class RoadOverlayManager(
                 handler.post { queryInProgress = false }
             }
         }.start()
+    }
+
+    /**
+     * 计算网格坐标键（1km x 1km 网格）
+     */
+    private fun getGridKey(lat: Double, lng: Double): String {
+        val gridLat = (lat * 1000 / (CACHE_GRID_SIZE_M / 111320.0)).toInt()
+        val gridLng = (lng * 1000 / (CACHE_GRID_SIZE_M / (111320.0 * cos(Math.toRadians(lat))))).toInt()
+        return "$gridLat,$gridLng"
     }
 
     /**

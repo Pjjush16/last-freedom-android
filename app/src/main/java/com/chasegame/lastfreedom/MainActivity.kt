@@ -386,14 +386,11 @@ class MainActivity : AppCompatActivity() {
         val destLat = center.latitude
         val destLng = center.longitude
 
-        // 吸附到最近道路
-        val snapped = roadManager?.snapToRoad(destLat, destLng) ?: GeoPoint(destLat, destLng)
-
-        // 放置目的地标记
+        // 放置目的地标记（用户选点不吸附到道路，使用原始坐标）
         pickedDestMarker?.let { map.overlays.remove(it) }
         pickedDestMarker = Marker(map).apply {
-            position = snapped
-            title = "目的地 ${snapped.latitude}, ${snapped.longitude}"
+            position = GeoPoint(destLat, destLng)
+            title = "目的地 $destLat, $destLng"
             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
         }
         map.overlays.add(pickedDestMarker)
