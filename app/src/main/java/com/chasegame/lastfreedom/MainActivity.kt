@@ -185,8 +185,8 @@ class MainActivity : AppCompatActivity() {
             setSupportZoom(false)
             builtInZoomControls = false
             displayZoomControls = false
-            useWideViewPort = true
-            loadWithOverviewMode = true
+            useWideViewPort = false
+            loadWithOverviewMode = false
         }
         stickerRight.loadUrl("file:///android_asset/sticker_right.html")
 
@@ -200,8 +200,8 @@ class MainActivity : AppCompatActivity() {
             setSupportZoom(false)
             builtInZoomControls = false
             displayZoomControls = false
-            useWideViewPort = true
-            loadWithOverviewMode = true
+            useWideViewPort = false
+            loadWithOverviewMode = false
         }
         stickerLeft.loadUrl("file:///android_asset/sticker_left.html")
     }

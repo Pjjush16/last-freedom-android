@@ -152,22 +152,22 @@
             android:textStyle="bold" />
     </LinearLayout>
 
-    <!-- 左下角贴纸（GIF动画） -->
+    <!-- 左下角贴纸（GIF动画 90x90 方形） -->
     <WebView
         android:id="@+id/stickerLeft"
-        android:layout_width="80dp"
-        android:layout_height="100dp"
+        android:layout_width="70dp"
+        android:layout_height="70dp"
         android:layout_gravity="bottom|start"
-        android:layout_marginStart="12dp"
+        android:layout_marginStart="8dp"
         android:layout_marginBottom="64dp" />
 
-    <!-- 右下角贴纸（WebP动画） -->
+    <!-- 右下角贴纸（WebP动画 320x467 竖版） -->
     <WebView
         android:id="@+id/stickerRight"
-        android:layout_width="80dp"
-        android:layout_height="100dp"
+        android:layout_width="72dp"
+        android:layout_height="105dp"
         android:layout_gravity="bottom|end"
-        android:layout_marginEnd="12dp"
+        android:layout_marginEnd="8dp"
         android:layout_marginBottom="64dp" />
 
 </FrameLayout>
