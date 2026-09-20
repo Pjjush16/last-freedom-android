@@ -294,6 +294,8 @@ class MainActivity : AppCompatActivity() {
                 interpolatedProvider?.lastKnownLocation?.let { loc ->
                     roadManager?.updateForPosition(loc.latitude, loc.longitude)
                 }
+                // 确保车标在路网上方
+                bringCarToTop()
             }
             MapMode.STANDARD -> {
                 map.setTileSource(createOsmStandardSource())
@@ -422,6 +424,14 @@ class MainActivity : AppCompatActivity() {
             isDrawAccuracyEnabled = true
         }
         map.overlays.add(locationOverlay)
+    }
+
+    /** 将车标移到 overlay 列表末尾（绘制在最上层，在路网之上） */
+    private fun bringCarToTop() {
+        if (::locationOverlay.isInitialized) {
+            map.overlays.remove(locationOverlay)
+            map.overlays.add(locationOverlay)
+        }
     }
 
     // === 权限 ===
@@ -570,6 +580,8 @@ class MainActivity : AppCompatActivity() {
         if (currentMapMode == MapMode.SATELLITE_ROAD) {
             // 更新路网查询（移动超过 400m 时重新查询）
             roadManager?.updateForPosition(lat, lng)
+            // 确保车标在路网上方（移到 overlay 列表末尾）
+            bringCarToTop()
             // 道路吸附：将 GPS 坐标吸附到最近道路点
             val snapped = roadManager?.snapToRoad(lat, lng)
             if (snapped != null) {
