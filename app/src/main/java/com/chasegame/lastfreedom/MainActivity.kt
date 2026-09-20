@@ -18,6 +18,7 @@ import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.MapTileIndex
 import org.osmdroid.views.overlay.TilesOverlay
+import org.osmdroid.views.overlay.Marker
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
@@ -78,12 +79,20 @@ class MainActivity : AppCompatActivity() {
     private lateinit var mapStyleMenu: View
     private var roadOverlay: TilesOverlay? = null
     private var roadManager: RoadOverlayManager? = null
+    private var pickedDestMarker: Marker? = null
 
     // === 速度→缩放迟滞（死区）===
     // zoom 变化需要速度持续 3 秒超过/低于阈值才执行，避免阈值边界"喘气"
     private var pendingZoomChange: Double = -1.0        // 待执行的目标 zoom（-1 = 无待执行）
     private var pendingZoomStartTime = 0L               // 速度首次越过阈值的时间
     private val HYSTERESIS_DURATION_MS = 3_000L         // 持续 3 秒才执行
+
+    // === 选点模式（高德风格：准星居中 + 拖地图选目的地）===
+    private var pickerModeActive = false
+    private var pickerCameraWasFollowing = true  // 进入选点前的相机状态
+
+    // === 路线信息显示 ===
+    private var tvRouteInfo: TextView? = null
 
     companion object {
         private const val PERM_REQUEST = 100
@@ -115,7 +124,7 @@ class MainActivity : AppCompatActivity() {
         map.maxZoomLevel = 18.0
         map.setBuiltInZoomControls(false)
 
-        // 检测用户触摸，暂停自动缩放
+        // 检测用户触摸，暂停自动缩放（选点模式下不干预地图拖动）
         map.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
@@ -167,6 +176,11 @@ class MainActivity : AppCompatActivity() {
                 val speedKmh = interpolatedProvider?.getSmoothedSpeedKmh()?.toDouble()?.coerceAtLeast(0.0) ?: 0.0
                 smoothedZoom = speedToZoom(speedKmh)
             }
+        }
+
+        // 导航选点按钮：进入高德风格移图选点模式
+        findViewById<TextView>(R.id.btnNavigate).setOnClickListener {
+            enterPickerMode()
         }
     }
 
@@ -297,6 +311,74 @@ class MainActivity : AppCompatActivity() {
         highlightMapOption(findViewById(optId))
     }
 
+    // === 选点模式（高德风格：准星居中 + 拖地图选目的地）===
+
+    private fun enterPickerMode() {
+        if (currentMapMode != MapMode.SATELLITE_ROAD) {
+            switchMapMode(MapMode.SATELLITE_ROAD)
+        }
+        pickerModeActive = true
+        pickerCameraWasFollowing = (cameraState == CameraState.FOLLOW)
+
+        // 暂停相机跟随
+        cameraState = CameraState.FLY_TO  // 借用 FLY_TO 状态暂停跟随
+
+        // 显示准星 + 提示 + 按钮
+        findViewById<View>(R.id.crosshairOverlay).visibility = View.VISIBLE
+        findViewById<View>(R.id.pickerHint).visibility = View.VISIBLE
+        findViewById<View>(R.id.pickerButtons).visibility = View.VISIBLE
+
+        // 隐藏 Dock
+        findViewById<View>(R.id.zoomDock).visibility = View.GONE
+
+        // 设置确认/取消按钮
+        findViewById<TextView>(R.id.btnPickerConfirm).setOnClickListener {
+            confirmPickedDestination()
+        }
+        findViewById<TextView>(R.id.btnPickerCancel).setOnClickListener {
+            exitPickerMode()
+        }
+    }
+
+    private fun confirmPickedDestination() {
+        // 获取地图中心点坐标
+        val center = map.mapCenter as GeoPoint
+        val destLat = center.latitude
+        val destLng = center.longitude
+
+        // 吸附到最近道路
+        val snapped = roadManager?.snapToRoad(destLat, destLng) ?: GeoPoint(destLat, destLng)
+
+        // 放置目的地标记
+        pickedDestMarker?.let { map.overlays.remove(it) }
+        pickedDestMarker = Marker(map).apply {
+            position = snapped
+            title = "目的地 ${snapped.latitude}, ${snapped.longitude}"
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+        }
+        map.overlays.add(pickedDestMarker)
+        map.invalidate()
+
+        exitPickerMode()
+    }
+
+    private fun exitPickerMode() {
+        pickerModeActive = false
+
+        // 隐藏准星 + 提示 + 按钮
+        findViewById<View>(R.id.crosshairOverlay).visibility = View.GONE
+        findViewById<View>(R.id.pickerHint).visibility = View.GONE
+        findViewById<View>(R.id.pickerButtons).visibility = View.GONE
+
+        // 恢复 Dock
+        findViewById<View>(R.id.zoomDock).visibility = View.VISIBLE
+
+        // 恢复相机跟随
+        if (pickerCameraWasFollowing) {
+            cameraState = CameraState.FOLLOW
+        }
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     private fun setupStickers() {
         // 右下角贴纸（WebP 动画）
@@ -378,6 +460,11 @@ class MainActivity : AppCompatActivity() {
 
     private val cameraRunnable = object : Runnable {
         override fun run() {
+            // 更新路网可见性（根据缩放级别）
+            if (currentMapMode == MapMode.SATELLITE_ROAD) {
+                roadManager?.updateZoomLevel(map.zoomLevelDouble)
+            }
+
             when (cameraState) {
                 CameraState.OPENING -> handleOpening()
                 CameraState.FOLLOW -> handleFollow()

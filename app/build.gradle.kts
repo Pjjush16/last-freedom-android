@@ -11,8 +11,8 @@ android {
         applicationId = "com.chasegame.lastfreedom"
         minSdk = 21
         targetSdk = 34
-        versionCode = 30
-        versionName = "5.8.0"
+        versionCode = 31
+        versionName = "5.9.0"
     }
 
     signingConfigs {

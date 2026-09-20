@@ -90,8 +90,9 @@
             android:maxWidth="260dp" />
     </LinearLayout>
 
-    <!-- 底部居中缩放控制面板（macOS Dock 风格，紧贴底部）：+ 锁定 - -->
+    <!-- 底部居中缩放控制面板（macOS Dock 风格，紧贴底部）：+ 锁定 - 导航 -->
     <LinearLayout
+        android:id="@+id/zoomDock"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|center_horizontal"
@@ -163,6 +164,22 @@
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="地图样式"
             android:text="🛣"
+            android:textSize="20sp"
+            android:textColor="#FFFFFF"
+            android:gravity="center" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="36dp"
+            android:background="#33FFFFFF" />
+
+        <TextView
+            android:id="@+id/btnNavigate"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="导航选点"
+            android:text="🧭"
             android:textSize="20sp"
             android:textColor="#FFFFFF"
             android:gravity="center" />
@@ -257,6 +274,94 @@
             android:textSize="13sp"
             android:textColor="#FFFFFF"
             android:gravity="center" />
+    </LinearLayout>
+
+    <!-- 选点准星（居中，仅在选点模式显示） -->
+    <FrameLayout
+        android:id="@+id/crosshairOverlay"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:visibility="gone">
+
+        <!-- 外圈 -->
+        <View
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_gravity="center"
+            android:background="@drawable/crosshair_ring" />
+        <!-- 中心点 -->
+        <View
+            android:layout_width="8dp"
+            android:layout_height="8dp"
+            android:layout_gravity="center"
+            android:background="@drawable/crosshair_dot" />
+    </FrameLayout>
+
+    <!-- 选点模式提示文字 -->
+    <TextView
+        android:id="@+id/pickerHint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="70dp"
+        android:background="@drawable/panel_bg"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:text="拖动地图选择目的地"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <!-- 选点模式确认/取消按钮栏 -->
+    <LinearLayout
+        android:id="@+id/pickerButtons"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="56dp"
+        android:background="@drawable/zoom_dock_bg"
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:paddingStart="6dp"
+        android:paddingEnd="6dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="6dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/btnPickerCancel"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackground"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:text="取消"
+            android:textSize="15sp"
+            android:textColor="#FF6B6B"
+            android:gravity="center"
+            android:textStyle="bold" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="32dp"
+            android:background="#33FFFFFF" />
+
+        <TextView
+            android:id="@+id/btnPickerConfirm"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackground"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:text="确定"
+            android:textSize="15sp"
+            android:textColor="#4FC3F7"
+            android:gravity="center"
+            android:textStyle="bold" />
     </LinearLayout>
 
 </FrameLayout>
