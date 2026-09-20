@@ -35,24 +35,47 @@ class RoadOverlayManager(
     // Polyline 叠加层
     private val roadPolylines = mutableListOf<Polyline>()
     private var isShowing = false
+    private val MIN_ZOOM_FOR_ROADS = 13.0
+    private var isVisible = false
+
+    // === 缩放控制 ===
+    fun updateZoomLevel(zoom: Double) {
+        if (!isShowing) return
+        val shouldShow = zoom >= MIN_ZOOM_FOR_ROADS
+        if (shouldShow != isVisible) {
+            isVisible = shouldShow
+            if (isVisible) {
+                roadPolylines.forEach { map.overlays.add(it) }
+            } else {
+                roadPolylines.forEach { map.overlays.remove(it) }
+            }
+            map.invalidate()
+        }
+    }
 
     // === 显示/隐藏路网叠加 ===
 
     fun show() {
         if (isShowing) return
         isShowing = true
-        roadPolylines.forEach { map.overlays.add(it) }
-        map.invalidate()
+        isVisible = map.zoomLevelDouble >= MIN_ZOOM_FOR_ROADS
+        if (isVisible) {
+            roadPolylines.forEach { map.overlays.add(it) }
+            map.invalidate()
+        }
     }
 
     fun hide() {
         if (!isShowing) return
         isShowing = false
-        roadPolylines.forEach { map.overlays.remove(it) }
-        map.invalidate()
+        if (isVisible) {
+            roadPolylines.forEach { map.overlays.remove(it) }
+            map.invalidate()
+        }
+        isVisible = false
     }
 
-    fun isVisible() = isShowing
+    fun isVisible() = isVisible
 
     // === 查询路网数据 ===
 
@@ -137,7 +160,7 @@ class RoadOverlayManager(
      */
     private fun updateRoadPolylines(roads: List<List<GeoPoint>>) {
         // 移除旧的
-        if (isShowing) {
+        if (isVisible) {
             roadPolylines.forEach { map.overlays.remove(it) }
         }
         roadPolylines.clear()
@@ -154,7 +177,7 @@ class RoadOverlayManager(
                 // 半透明填充让路网在卫星图上可见
             }
             roadPolylines.add(polyline)
-            if (isShowing) {
+            if (isVisible) {
                 map.overlays.add(polyline)
             }
         }
