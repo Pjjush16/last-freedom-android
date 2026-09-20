@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.location.Location
+import android.content.SharedPreferences
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -84,6 +85,7 @@ class MainActivity : AppCompatActivity() {
     private var roadOverlay: TilesOverlay? = null
     private var roadManager: RoadOverlayManager? = null
     private var pickedDestMarker: Marker? = null
+    private lateinit var prefs: SharedPreferences
 
     // === 速度→缩放迟滞（死区）===
     // zoom 变化需要速度持续 3 秒超过/低于阈值才执行，避免阈值边界"喘气"
@@ -114,6 +116,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Configuration.getInstance().userAgentValue = packageName
+        prefs = getSharedPreferences("lastfreedom", MODE_PRIVATE)
         setContentView(R.layout.activity_main)
 
         map = findViewById(R.id.mapView)
@@ -129,7 +132,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupMap() {
-        map.setTileSource(createSatelliteSource())
+        // 恢复上次选择的地图模式
+        val savedMode = prefs.getString("map_mode", "SATELLITE") ?: "SATELLITE"
+        currentMapMode = try { MapMode.valueOf(savedMode) } catch (_: Exception) { MapMode.SATELLITE }
+
+        // 根据恢复的模式设置底图
+        when (currentMapMode) {
+            MapMode.SATELLITE -> map.setTileSource(createSatelliteSource())
+            MapMode.SATELLITE_ROAD -> map.setTileSource(createSatelliteSource())
+            MapMode.STANDARD -> map.setTileSource(createOsmStandardSource())
+        }
+
         map.setMultiTouchControls(true)
         map.isTilesScaledToDpi = true
         map.minZoomLevel = 3.0
@@ -264,8 +277,13 @@ class MainActivity : AppCompatActivity() {
             mapStyleMenu.visibility = View.GONE
         }
 
-        // 高亮当前选中项
-        highlightMapOption(optSatellite)
+        // 高亮当前选中项（根据恢复的地图模式）
+        val initialOpt = when (currentMapMode) {
+            MapMode.SATELLITE -> optSatellite
+            MapMode.SATELLITE_ROAD -> optSatRoad
+            MapMode.STANDARD -> optStandard
+        }
+        highlightMapOption(initialOpt)
     }
 
     private fun highlightMapOption(selected: TextView) {
@@ -289,6 +307,9 @@ class MainActivity : AppCompatActivity() {
         if (mode == currentMapMode) return
         currentMapMode = mode
 
+        // 记住选择
+        prefs.edit().putString("map_mode", mode.name).apply()
+
         // 先移除旧的叠加层
         roadOverlay?.let { map.overlays.remove(it) }
         roadOverlay = null
@@ -300,7 +321,7 @@ class MainActivity : AppCompatActivity() {
             }
             MapMode.SATELLITE_ROAD -> {
                 map.setTileSource(createSatelliteSource())
-                // 使用矢量路网叠加（Overpass API 查询 + Polyline 绘制 + 道路吸附）
+                // 渲染路网 Polyline（仅在此模式下显示）
                 roadManager?.show()
                 // 用当前位置立即查询路网
                 interpolatedProvider?.lastKnownLocation?.let { loc ->
@@ -312,6 +333,11 @@ class MainActivity : AppCompatActivity() {
             MapMode.STANDARD -> {
                 map.setTileSource(createOsmStandardSource())
             }
+        }
+
+        // 所有模式下都加载路网数据（用于吸附），但不渲染
+        interpolatedProvider?.lastKnownLocation?.let { loc ->
+            roadManager?.updateForPosition(loc.latitude, loc.longitude)
         }
 
         map.invalidate()
@@ -606,25 +632,26 @@ class MainActivity : AppCompatActivity() {
             pendingZoomStartTime = 0L
         }
 
-        // === 路网叠加 + 持续道路吸附（仅 SATELLITE_ROAD 模式）===
-        var displayLat = lat
-        var displayLng = lng
+        // === 路网数据更新（所有模式都加载，用于吸附）===
+        roadManager?.updateForPosition(lat, lng)
+
+        // === 路网渲染（仅 SATELLITE_ROAD 模式显示 Polyline）===
         if (currentMapMode == MapMode.SATELLITE_ROAD) {
-            // 更新路网查询（移动超过 400m 时重新查询）
-            roadManager?.updateForPosition(lat, lng)
             // 确保车标在路网上方（移到 overlay 列表末尾）
             bringCarToTop()
+        }
 
-            // 持续道路吸附：速度 > 20km/h 且间隔 > 500ms 时吸附
-            val speedKmh = gpsSpeed * 3.6f  // m/s → km/h
-            if (speedKmh > SPEED_THRESHOLD_FOR_SNAP && (now - lastRoadSnapTime) >= ROAD_SNAP_INTERVAL) {
-                val snapped = roadManager?.snapToRoad(lat, lng)
-                if (snapped != null) {
-                    displayLat = snapped.latitude
-                    displayLng = snapped.longitude
-                }
-                lastRoadSnapTime = now
+        // === 持续道路吸附（所有模式都生效，速度 > 20km/h 且间隔 > 500ms）===
+        var displayLat = lat
+        var displayLng = lng
+        val speedKmh = gpsSpeed * 3.6f  // m/s → km/h
+        if (speedKmh > SPEED_THRESHOLD_FOR_SNAP && (now - lastRoadSnapTime) >= ROAD_SNAP_INTERVAL) {
+            val snapped = roadManager?.snapToRoad(lat, lng)
+            if (snapped != null) {
+                displayLat = snapped.latitude
+                displayLng = snapped.longitude
             }
+            lastRoadSnapTime = now
         }
 
         // === 位置跟随（始终执行，不受锁定影响）===

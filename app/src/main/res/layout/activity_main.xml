@@ -220,7 +220,7 @@
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|center_horizontal"
         android:layout_marginBottom="56dp"
-        android:background="@drawable/zoom_dock_bg"
+        android:background="@drawable/map_picker_bg"
         android:gravity="center"
         android:orientation="horizontal"
         android:paddingStart="8dp"
