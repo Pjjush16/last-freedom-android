@@ -103,6 +103,9 @@ class MainActivity : AppCompatActivity() {
     // === 惯导融合 ===
     private var inertialManager: InertialNavigationManager? = null
 
+    // === 背景音乐 ===
+    private var bgmManager: BgmManager? = null
+
     // === 持续道路吸附 ===
     private var lastRoadSnapTime = 0L
     private val ROAD_SNAP_INTERVAL = 500L  // 每500ms吸附一次
@@ -391,6 +394,9 @@ class MainActivity : AppCompatActivity() {
         map.invalidate()
 
         exitPickerMode()
+        
+        // 开始播放追逐音乐
+        bgmManager?.startChaseMusic()
     }
 
     private fun exitPickerMode() {
@@ -493,6 +499,7 @@ class MainActivity : AppCompatActivity() {
         setupLocationOverlay()
         setupRoadManager()
         setupInertialNavigation()
+        bgmManager = BgmManager(this)
         startHudUpdater()
         startCameraSystem()
     }
@@ -843,6 +850,7 @@ class MainActivity : AppCompatActivity() {
         interpolatedProvider?.destroy()
         roadManager?.destroy()
         inertialManager?.destroy()
+        bgmManager?.release()
         handler.removeCallbacksAndMessages(null)
     }
 }
