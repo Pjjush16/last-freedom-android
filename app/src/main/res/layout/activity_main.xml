@@ -152,26 +152,32 @@
             android:textStyle="bold" />
     </LinearLayout>
 
-    <!-- 底部居中贴纸栏：GIF(左) + WebP(右) 并排 -->
-    <LinearLayout
+    <!-- 左下角贴纸：GIF -->
+    <FrameLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom|center_horizontal"
-        android:layout_marginBottom="60dp"
-        android:gravity="center"
-        android:orientation="horizontal">
+        android:layout_gravity="bottom|start"
+        android:layout_marginBottom="4dp"
+        android:layout_marginStart="4dp">
 
         <WebView
             android:id="@+id/stickerLeft"
-            android:layout_width="64dp"
-            android:layout_height="64dp"
-            android:layout_marginEnd="12dp" />
+            android:layout_width="70dp"
+            android:layout_height="70dp" />
+    </FrameLayout>
+
+    <!-- 右下角贴纸：WebP -->
+    <FrameLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_marginBottom="4dp"
+        android:layout_marginEnd="4dp">
 
         <WebView
             android:id="@+id/stickerRight"
-            android:layout_width="48dp"
-            android:layout_height="70dp"
-            android:layout_marginStart="12dp" />
-    </LinearLayout>
+            android:layout_width="72dp"
+            android:layout_height="105dp" />
+    </FrameLayout>
 
 </FrameLayout>
