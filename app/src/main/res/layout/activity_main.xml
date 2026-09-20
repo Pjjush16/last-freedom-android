@@ -150,6 +150,22 @@
             android:textColor="#FFFFFF"
             android:gravity="center"
             android:textStyle="bold" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="36dp"
+            android:background="#33FFFFFF" />
+
+        <TextView
+            android:id="@+id/btnMapStyle"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="地图样式"
+            android:text="🛣"
+            android:textSize="20sp"
+            android:textColor="#FFFFFF"
+            android:gravity="center" />
     </LinearLayout>
 
     <!-- 左下角贴纸：GIF -->
@@ -179,5 +195,68 @@
             android:layout_width="72dp"
             android:layout_height="105dp" />
     </FrameLayout>
+
+    <!-- 地图样式选择弹出面板 -->
+    <LinearLayout
+        android:id="@+id/mapStyleMenu"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="56dp"
+        android:background="@drawable/zoom_dock_bg"
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/optSatellite"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackground"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:text="🛰 卫星"
+            android:textSize="13sp"
+            android:textColor="#FFFFFF"
+            android:gravity="center" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="#33FFFFFF" />
+
+        <TextView
+            android:id="@+id/optSatRoad"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackground"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:text="🛣 卫星+路网"
+            android:textSize="13sp"
+            android:textColor="#FFFFFF"
+            android:gravity="center" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="#33FFFFFF" />
+
+        <TextView
+            android:id="@+id/optStandard"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackground"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:text="🗺 标准"
+            android:textSize="13sp"
+            android:textColor="#FFFFFF"
+            android:gravity="center" />
+    </LinearLayout>
 
 </FrameLayout>

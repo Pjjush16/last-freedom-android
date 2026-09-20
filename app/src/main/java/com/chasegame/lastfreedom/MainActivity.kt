@@ -16,6 +16,8 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.XYTileSource
+import org.osmdroid.util.MapTileIndex
+import org.osmdroid.views.overlay.TilesOverlay
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
@@ -70,6 +72,12 @@ class MainActivity : AppCompatActivity() {
     private var zoomLocked = false
     private lateinit var btnZoomLock: TextView
 
+    // === 地图样式 ===
+    private enum class MapMode { SATELLITE, SATELLITE_ROAD, STANDARD }
+    private var currentMapMode = MapMode.SATELLITE
+    private lateinit var mapStyleMenu: View
+    private var roadOverlay: TilesOverlay? = null
+
     // === 速度→缩放迟滞（死区）===
     // zoom 变化需要速度持续 3 秒超过/低于阈值才执行，避免阈值边界"喘气"
     private var pendingZoomChange: Double = -1.0        // 待执行的目标 zoom（-1 = 无待执行）
@@ -92,30 +100,17 @@ class MainActivity : AppCompatActivity() {
 
         setupMap()
         setupZoomControls()
+        setupMapStyleMenu()
         setupStickers()
         requestPermissions()
     }
 
     private fun setupMap() {
-        val tileSource = object : XYTileSource(
-            "arcgis_world_imagery", 1, 18, 256, ".jpg",
-            arrayOf("https://server.arcgisonline.com")
-        ) {
-            override fun getTileURLString(pMapTileIndex: Long): String {
-                val x = org.osmdroid.util.MapTileIndex.getX(pMapTileIndex)
-                val y = org.osmdroid.util.MapTileIndex.getY(pMapTileIndex)
-                var z = org.osmdroid.util.MapTileIndex.getZoom(pMapTileIndex)
-                if (z > 18) z = 18
-                return "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/$z/$y/$x"
-            }
-        }
-
-        map.setTileSource(tileSource)
+        map.setTileSource(createSatelliteSource())
         map.setMultiTouchControls(true)
         map.isTilesScaledToDpi = true
         map.minZoomLevel = 3.0
         map.maxZoomLevel = 18.0
-        // 禁用 osmdroid 内置缩放控件，使用自定义按钮
         map.setBuiltInZoomControls(false)
 
         // 检测用户触摸，暂停自动缩放
@@ -171,6 +166,133 @@ class MainActivity : AppCompatActivity() {
                 smoothedZoom = speedToZoom(speedKmh)
             }
         }
+    }
+
+    // === OSM Carto 路网叠加层（透明底，只有道路） ===
+    private fun createRoadOverlaySource(): XYTileSource {
+        return object : XYTileSource("osm_carto_only", 1, 18, 256, ".png",
+            arrayOf("https://tile.openstreetmap.org")) {
+            override fun getTileURLString(pMapTileIndex: Long): String {
+                val z = MapTileIndex.getZoom(pMapTileIndex)
+                val x = MapTileIndex.getX(pMapTileIndex)
+                val y = MapTileIndex.getY(pMapTileIndex)
+                val clampedZ = if (z > 18) 18 else z
+                return "https://tile.openstreetmap.org/$clampedZ/$x/$y.png"
+            }
+        }
+    }
+
+    // === OSM 标准地图 ===
+    private fun createOsmStandardSource(): XYTileSource {
+        return object : XYTileSource("osm_standard", 1, 18, 256, ".png",
+            arrayOf("https://tile.openstreetmap.org")) {
+            override fun getTileURLString(pMapTileIndex: Long): String {
+                val z = MapTileIndex.getZoom(pMapTileIndex)
+                val x = MapTileIndex.getX(pMapTileIndex)
+                val y = MapTileIndex.getY(pMapTileIndex)
+                val clampedZ = if (z > 18) 18 else z
+                return "https://tile.openstreetmap.org/$clampedZ/$x/$y.png"
+            }
+        }
+    }
+
+    // === ArcGIS 卫星底图 ===
+    private fun createSatelliteSource(): XYTileSource {
+        return object : XYTileSource("arcgis_world_imagery", 1, 18, 256, ".jpg",
+            arrayOf("https://server.arcgisonline.com")) {
+            override fun getTileURLString(pMapTileIndex: Long): String {
+                val x = MapTileIndex.getX(pMapTileIndex)
+                val y = MapTileIndex.getY(pMapTileIndex)
+                var z = MapTileIndex.getZoom(pMapTileIndex)
+                if (z > 18) z = 18
+                return "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/$z/$y/$x"
+            }
+        }
+    }
+
+    private fun setupMapStyleMenu() {
+        mapStyleMenu = findViewById(R.id.mapStyleMenu)
+
+        val optSatellite = findViewById<TextView>(R.id.optSatellite)
+        val optSatRoad = findViewById<TextView>(R.id.optSatRoad)
+        val optStandard = findViewById<TextView>(R.id.optStandard)
+
+        findViewById<TextView>(R.id.btnMapStyle).setOnClickListener {
+            mapStyleMenu.visibility = if (mapStyleMenu.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
+
+        optSatellite.setOnClickListener {
+            switchMapMode(MapMode.SATELLITE)
+            mapStyleMenu.visibility = View.GONE
+        }
+
+        optSatRoad.setOnClickListener {
+            switchMapMode(MapMode.SATELLITE_ROAD)
+            mapStyleMenu.visibility = View.GONE
+        }
+
+        optStandard.setOnClickListener {
+            switchMapMode(MapMode.STANDARD)
+            mapStyleMenu.visibility = View.GONE
+        }
+
+        // 高亮当前选中项
+        highlightMapOption(optSatellite)
+    }
+
+    private fun highlightMapOption(selected: TextView) {
+        val opts = listOf(
+            findViewById<TextView>(R.id.optSatellite),
+            findViewById<TextView>(R.id.optSatRoad),
+            findViewById<TextView>(R.id.optStandard)
+        )
+        opts.forEach {
+            if (it == selected) {
+                it.setTextColor(0xFF00E5FF.toInt())
+                it.alpha = 1.0f
+            } else {
+                it.setTextColor(0x99FFFFFF.toInt())
+                it.alpha = 0.7f
+            }
+        }
+    }
+
+    private fun switchMapMode(mode: MapMode) {
+        if (mode == currentMapMode) return
+        currentMapMode = mode
+
+        // 先移除旧的叠加层
+        roadOverlay?.let { map.overlays.remove(it) }
+        roadOverlay = null
+
+        when (mode) {
+            MapMode.SATELLITE -> {
+                map.setTileSource(createSatelliteSource())
+            }
+            MapMode.SATELLITE_ROAD -> {
+                map.setTileSource(createSatelliteSource())
+                // 添加 OSM Carto 路网叠加层
+                val roadSource = createRoadOverlaySource()
+                roadOverlay = TilesOverlay(
+                    org.osmdroid.tileprovider.MapTileProviderBasic(applicationContext, roadSource),
+                    applicationContext
+                )
+                map.overlays.add(roadOverlay)
+            }
+            MapMode.STANDARD -> {
+                map.setTileSource(createOsmStandardSource())
+            }
+        }
+
+        map.invalidate()
+
+        // 高亮选中项
+        val optId = when (mode) {
+            MapMode.SATELLITE -> R.id.optSatellite
+            MapMode.SATELLITE_ROAD -> R.id.optSatRoad
+            MapMode.STANDARD -> R.id.optStandard
+        }
+        highlightMapOption(findViewById(optId))
     }
 
     @SuppressLint("SetJavaScriptEnabled")
