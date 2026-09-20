@@ -77,6 +77,7 @@ class MainActivity : AppCompatActivity() {
     private var currentMapMode = MapMode.SATELLITE
     private lateinit var mapStyleMenu: View
     private var roadOverlay: TilesOverlay? = null
+    private var roadManager: RoadOverlayManager? = null
 
     // === 速度→缩放迟滞（死区）===
     // zoom 变化需要速度持续 3 秒超过/低于阈值才执行，避免阈值边界"喘气"
@@ -101,6 +102,7 @@ class MainActivity : AppCompatActivity() {
         setupMap()
         setupZoomControls()
         setupMapStyleMenu()
+        roadManager = RoadOverlayManager(map, handler)
         setupStickers()
         requestPermissions()
     }
@@ -171,13 +173,13 @@ class MainActivity : AppCompatActivity() {
     // === OSM Carto 路网叠加层（透明底，只有道路） ===
     private fun createRoadOverlaySource(): XYTileSource {
         return object : XYTileSource("osm_carto_only", 1, 18, 256, ".png",
-            arrayOf("https://tile.openstreetmap.org")) {
+            arrayOf("https://tile.openstreetmap.de")) {
             override fun getTileURLString(pMapTileIndex: Long): String {
                 val z = MapTileIndex.getZoom(pMapTileIndex)
                 val x = MapTileIndex.getX(pMapTileIndex)
                 val y = MapTileIndex.getY(pMapTileIndex)
                 val clampedZ = if (z > 18) 18 else z
-                return "https://tile.openstreetmap.org/$clampedZ/$x/$y.png"
+                return "https://tile.openstreetmap.de/$clampedZ/$x/$y.png"
             }
         }
     }
@@ -185,13 +187,13 @@ class MainActivity : AppCompatActivity() {
     // === OSM 标准地图 ===
     private fun createOsmStandardSource(): XYTileSource {
         return object : XYTileSource("osm_standard", 1, 18, 256, ".png",
-            arrayOf("https://tile.openstreetmap.org")) {
+            arrayOf("https://tile.openstreetmap.de")) {
             override fun getTileURLString(pMapTileIndex: Long): String {
                 val z = MapTileIndex.getZoom(pMapTileIndex)
                 val x = MapTileIndex.getX(pMapTileIndex)
                 val y = MapTileIndex.getY(pMapTileIndex)
                 val clampedZ = if (z > 18) 18 else z
-                return "https://tile.openstreetmap.org/$clampedZ/$x/$y.png"
+                return "https://tile.openstreetmap.de/$clampedZ/$x/$y.png"
             }
         }
     }
@@ -264,6 +266,7 @@ class MainActivity : AppCompatActivity() {
         // 先移除旧的叠加层
         roadOverlay?.let { map.overlays.remove(it) }
         roadOverlay = null
+        roadManager?.hide()
 
         when (mode) {
             MapMode.SATELLITE -> {
@@ -271,13 +274,12 @@ class MainActivity : AppCompatActivity() {
             }
             MapMode.SATELLITE_ROAD -> {
                 map.setTileSource(createSatelliteSource())
-                // 添加 OSM Carto 路网叠加层
-                val roadSource = createRoadOverlaySource()
-                roadOverlay = TilesOverlay(
-                    org.osmdroid.tileprovider.MapTileProviderBasic(applicationContext, roadSource),
-                    applicationContext
-                )
-                map.overlays.add(roadOverlay)
+                // 使用矢量路网叠加（Overpass API 查询 + Polyline 绘制 + 道路吸附）
+                roadManager?.show()
+                // 用当前位置立即查询路网
+                interpolatedProvider?.lastKnownLocation?.let { loc ->
+                    roadManager?.updateForPosition(loc.latitude, loc.longitude)
+                }
             }
             MapMode.STANDARD -> {
                 map.setTileSource(createOsmStandardSource())
@@ -475,24 +477,38 @@ class MainActivity : AppCompatActivity() {
             pendingZoomStartTime = 0L
         }
 
+        // === 路网叠加 + 道路吸附（仅 SATELLITE_ROAD 模式）===
+        var displayLat = lat
+        var displayLng = lng
+        if (currentMapMode == MapMode.SATELLITE_ROAD) {
+            // 更新路网查询（移动超过 400m 时重新查询）
+            roadManager?.updateForPosition(lat, lng)
+            // 道路吸附：将 GPS 坐标吸附到最近道路点
+            val snapped = roadManager?.snapToRoad(lat, lng)
+            if (snapped != null) {
+                displayLat = snapped.latitude
+                displayLng = snapped.longitude
+            }
+        }
+
         // === 位置跟随（始终执行，不受锁定影响）===
-        val distM = haversine(lastFollowLat, lastFollowLng, lat, lng)
+        val distM = haversine(lastFollowLat, lastFollowLng, displayLat, displayLng)
 
         if (distM > 5.0) {
             val zoom = map.zoomLevel.toDouble()
-            val metersPerPixel = 156543.03392 * cos(Math.toRadians(lat)) / Math.pow(2.0, zoom.toDouble())
+            val metersPerPixel = 156543.03392 * cos(Math.toRadians(displayLat)) / Math.pow(2.0, zoom.toDouble())
             val screenPx = (distM / metersPerPixel).toInt()
 
             if (screenPx > flyThresholdPx) {
-                startFlyAnimation(lat, lng)
+                startFlyAnimation(displayLat, displayLng)
                 return
             }
 
             if (now - lastZoomSetTime > 900) {
-                map.controller.animateTo(GeoPoint(lat, lng))
+                map.controller.animateTo(GeoPoint(displayLat, displayLng))
             }
-            lastFollowLat = lat
-            lastFollowLng = lng
+            lastFollowLat = displayLat
+            lastFollowLng = displayLng
         }
     }
 
@@ -671,6 +687,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         interpolatedProvider?.destroy()
+        roadManager?.destroy()
         handler.removeCallbacksAndMessages(null)
     }
 }
