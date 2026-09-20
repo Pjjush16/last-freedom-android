@@ -4,6 +4,10 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.location.Location
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -93,6 +97,14 @@ class MainActivity : AppCompatActivity() {
 
     // === 路线信息显示 ===
     private var tvRouteInfo: TextView? = null
+
+    // === 惯导融合 ===
+    private var inertialManager: InertialNavigationManager? = null
+
+    // === 持续道路吸附 ===
+    private var lastRoadSnapTime = 0L
+    private val ROAD_SNAP_INTERVAL = 500L  // 每500ms吸附一次
+    private val SPEED_THRESHOLD_FOR_SNAP = 20f  // km/h，速度>20才吸附
 
     companion object {
         private const val PERM_REQUEST = 100
@@ -462,8 +474,19 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("MissingPermission")
     private fun onPermissionGranted() {
         setupLocationOverlay()
+        setupRoadManager()
+        setupInertialNavigation()
         startHudUpdater()
         startCameraSystem()
+    }
+
+    private fun setupRoadManager() {
+        roadManager = RoadOverlayManager(map, handler)
+    }
+
+    private fun setupInertialNavigation() {
+        val sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+        inertialManager = InertialNavigationManager(sensorManager, handler)
     }
 
     // === 三状态相机系统 ===
@@ -528,8 +551,17 @@ class MainActivity : AppCompatActivity() {
         if (!provider.hasGpsFix()) return
 
         val loc = provider.lastKnownLocation ?: return
-        val lat = loc.latitude
-        val lng = loc.longitude
+        val gpsLat = loc.latitude
+        val gpsLng = loc.longitude
+        val gpsAccuracy = loc.accuracy
+        val gpsBearing = loc.bearing
+        val gpsSpeed = loc.speed
+
+        // === 惯导融合 ===
+        val fusedPoint = inertialManager?.updateGps(gpsLat, gpsLng, gpsAccuracy, gpsBearing, gpsSpeed)
+            ?: GeoPoint(gpsLat, gpsLng)
+        val lat = fusedPoint.latitude
+        val lng = fusedPoint.longitude
 
         if (!hasLastFollow) {
             lastFollowLat = lat
@@ -574,7 +606,7 @@ class MainActivity : AppCompatActivity() {
             pendingZoomStartTime = 0L
         }
 
-        // === 路网叠加 + 道路吸附（仅 SATELLITE_ROAD 模式）===
+        // === 路网叠加 + 持续道路吸附（仅 SATELLITE_ROAD 模式）===
         var displayLat = lat
         var displayLng = lng
         if (currentMapMode == MapMode.SATELLITE_ROAD) {
@@ -582,11 +614,16 @@ class MainActivity : AppCompatActivity() {
             roadManager?.updateForPosition(lat, lng)
             // 确保车标在路网上方（移到 overlay 列表末尾）
             bringCarToTop()
-            // 道路吸附：将 GPS 坐标吸附到最近道路点
-            val snapped = roadManager?.snapToRoad(lat, lng)
-            if (snapped != null) {
-                displayLat = snapped.latitude
-                displayLng = snapped.longitude
+
+            // 持续道路吸附：速度 > 20km/h 且间隔 > 500ms 时吸附
+            val speedKmh = gpsSpeed * 3.6f  // m/s → km/h
+            if (speedKmh > SPEED_THRESHOLD_FOR_SNAP && (now - lastRoadSnapTime) >= ROAD_SNAP_INTERVAL) {
+                val snapped = roadManager?.snapToRoad(lat, lng)
+                if (snapped != null) {
+                    displayLat = snapped.latitude
+                    displayLng = snapped.longitude
+                }
+                lastRoadSnapTime = now
             }
         }
 
@@ -787,6 +824,7 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         interpolatedProvider?.destroy()
         roadManager?.destroy()
+        inertialManager?.destroy()
         handler.removeCallbacksAndMessages(null)
     }
 }
