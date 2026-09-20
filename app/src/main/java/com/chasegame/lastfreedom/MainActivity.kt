@@ -12,6 +12,8 @@ import android.view.View
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import android.webkit.WebSettings
+import android.webkit.WebView
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.GeoPoint
@@ -90,6 +92,7 @@ class MainActivity : AppCompatActivity() {
 
         setupMap()
         setupZoomControls()
+        setupStickers()
         requestPermissions()
     }
 
@@ -168,6 +171,39 @@ class MainActivity : AppCompatActivity() {
                 smoothedZoom = speedToZoom(speedKmh)
             }
         }
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun setupStickers() {
+        // 右下角贴纸（WebP 动画）
+        val stickerRight = findViewById<WebView>(R.id.stickerRight)
+        stickerRight.setBackgroundColor(0x00000000) // 透明背景
+        stickerRight.isVerticalScrollBarEnabled = false
+        stickerRight.isHorizontalScrollBarEnabled = false
+        stickerRight.settings.apply {
+            javaScriptEnabled = false
+            setSupportZoom(false)
+            builtInZoomControls = false
+            displayZoomControls = false
+            useWideViewPort = true
+            loadWithOverviewMode = true
+        }
+        stickerRight.loadUrl("file:///android_asset/sticker_right.html")
+
+        // 左下角贴纸（GIF 动画）
+        val stickerLeft = findViewById<WebView>(R.id.stickerLeft)
+        stickerLeft.setBackgroundColor(0x00000000) // 透明背景
+        stickerLeft.isVerticalScrollBarEnabled = false
+        stickerLeft.isHorizontalScrollBarEnabled = false
+        stickerLeft.settings.apply {
+            javaScriptEnabled = false
+            setSupportZoom(false)
+            builtInZoomControls = false
+            displayZoomControls = false
+            useWideViewPort = true
+            loadWithOverviewMode = true
+        }
+        stickerLeft.loadUrl("file:///android_asset/sticker_left.html")
     }
 
     private fun setupLocationOverlay() {
