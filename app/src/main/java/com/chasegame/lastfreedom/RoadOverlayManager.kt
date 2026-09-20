@@ -172,7 +172,7 @@ class RoadOverlayManager(
             val polyline = Polyline().apply {
                 setPoints(roadPoints)
                 outlinePaint.color = 0xAAFFAA00.toInt() // 半透明橙色
-                outlinePaint.strokeWidth = 4f
+                outlinePaint.strokeWidth = 10f
                 outlinePaint.isAntiAlias = true
                 // 半透明填充让路网在卫星图上可见
             }
