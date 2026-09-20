@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
+    <!-- 地图 -->
     <org.osmdroid.views.MapView
         android:id="@+id/mapView"
         android:layout_width="match_parent"
@@ -45,284 +47,353 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="top|end"
-        android:layout_marginTop="8dp"
-        android:layout_marginEnd="8dp"
-        android:orientation="vertical"
-        android:gravity="end">
+        android:layout_marginTop="16dp"
+        android:layout_marginEnd="12dp"
+        android:background="@drawable/panel_bg"
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:paddingStart="14dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="14dp"
+        android:paddingBottom="10dp">
 
         <TextView
             android:id="@+id/tvSpeed"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="0"
-            android:textColor="#FFFFFF"
-            android:textSize="48sp"
+            android:textColor="@color/white"
+            android:textSize="32sp"
             android:textStyle="bold"
-            android:background="#80000000"
-            android:paddingStart="12dp"
-            android:paddingTop="4dp"
-            android:paddingEnd="12dp"
-            android:paddingBottom="4dp" />
+            android:fontFamily="monospace" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginBottom="2dp"
             android:text="km/h"
-            android:textColor="#FFFFFF"
-            android:textSize="14sp"
-            android:background="#80000000"
-            android:paddingStart="12dp"
-            android:paddingTop="2dp"
-            android:paddingEnd="12dp"
-            android:paddingBottom="4dp" />
+            android:textColor="#99FFFFFF"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.1" />
     </LinearLayout>
 
-    <!-- 底部控制栏 -->
+    <!-- 顶部中央路名（逆地理编码实时获取） -->
     <LinearLayout
-        android:id="@+id/bottomControls"
-        android:layout_width="match_parent"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
-        android:orientation="vertical"
-        android:background="#80000000"
-        android:padding="8dp">
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="16dp"
+        android:background="@drawable/panel_bg"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="8dp">
 
-        <LinearLayout
-            android:layout_width="match_parent"
+        <!-- LOCATION 标签 -->
+        <TextView
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center">
-
-            <ImageButton
-                android:id="@+id/btnMapMode"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:src="@android:drawable/ic_menu_mapmode"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="地图模式" />
-
-            <ImageButton
-                android:id="@+id/btnPickPoint"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:src="@android:drawable/ic_menu_myplaces"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="选点"
-                android:layout_marginStart="16dp" />
-
-            <ImageButton
-                android:id="@+id/btnCenter"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:src="@android:drawable/ic_menu_mylocation"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="居中"
-                android:layout_marginStart="16dp" />
-        </LinearLayout>
+            android:background="@drawable/location_badge"
+            android:paddingStart="8dp"
+            android:paddingTop="2dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="2dp"
+            android:text="LOCATION"
+            android:textColor="@color/white"
+            android:textSize="9sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.15" />
 
         <TextView
-            android:id="@+id/tvRoadName"
-            android:layout_width="match_parent"
+            android:id="@+id/tvRoad"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
             android:text="等待定位..."
-            android:textColor="#FFFFFF"
-            android:textSize="14sp"
-            android:gravity="center"
-            android:layout_marginTop="8dp" />
-
-        <TextView
-            android:id="@+id/tvCoordinate"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text=""
-            android:textColor="#FFFFFF"
-            android:textSize="12sp"
-            android:gravity="center"
-            android:visibility="gone" />
+            android:textColor="@color/white"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:maxWidth="260dp" />
     </LinearLayout>
 
-    <!-- Dock 控制栏 -->
+    <!-- 底部居中缩放控制面板（macOS Dock 风格，紧贴底部）：+ 锁定 - 导航 -->
     <LinearLayout
         android:id="@+id/zoomDock"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|center_horizontal"
-        android:layout_marginBottom="8dp"
-        android:orientation="horizontal"
+        android:layout_marginBottom="0dp"
         android:background="@drawable/zoom_dock_bg"
-        android:padding="8dp"
-        android:gravity="center_vertical">
-
-        <ImageButton
-            android:id="@+id/btnZoomOut"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:src="@android:drawable/btn_minus"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="缩小" />
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:paddingStart="6dp"
+        android:paddingEnd="6dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="6dp">
 
         <TextView
-            android:id="@+id/tvZoomLevel"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="15"
-            android:textColor="#FFFFFF"
-            android:textSize="16sp"
-            android:textStyle="bold"
-            android:layout_marginStart="8dp"
-            android:layout_marginEnd="8dp" />
-
-        <ImageButton
             android:id="@+id/btnZoomIn"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:src="@android:drawable/btn_plus"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
             android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="放大" />
+            android:contentDescription="放大"
+            android:text="+"
+            android:textSize="24sp"
+            android:textColor="#FFFFFF"
+            android:gravity="center"
+            android:textStyle="bold" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="36dp"
+            android:background="#33FFFFFF" />
+
+        <TextView
+            android:id="@+id/btnZoomLock"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="锁定缩放"
+            android:text="🔓"
+            android:textSize="20sp"
+            android:textColor="#99FFFFFF"
+            android:gravity="center"
+            android:textStyle="bold"
+            android:alpha="0.6" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="36dp"
+            android:background="#33FFFFFF" />
+
+        <TextView
+            android:id="@+id/btnZoomOut"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="缩小"
+            android:text="-"
+            android:textSize="24sp"
+            android:textColor="#FFFFFF"
+            android:gravity="center"
+            android:textStyle="bold" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="36dp"
+            android:background="#33FFFFFF" />
+
+        <TextView
+            android:id="@+id/btnMapStyle"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="地图样式"
+            android:text="🛣"
+            android:textSize="20sp"
+            android:textColor="#FFFFFF"
+            android:gravity="center" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="36dp"
+            android:background="#33FFFFFF" />
+
+        <TextView
+            android:id="@+id/btnNavigate"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="导航选点"
+            android:text="🧭"
+            android:textSize="20sp"
+            android:textColor="#FFFFFF"
+            android:gravity="center" />
     </LinearLayout>
 
-    <!-- 地图模式选择器 -->
-    <LinearLayout
-        android:id="@+id/mapModeSelector"
+    <!-- 左下角贴纸：GIF -->
+    <FrameLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|start"
-        android:layout_marginStart="8dp"
-        android:layout_marginBottom="120dp"
-        android:orientation="vertical"
-        android:background="@drawable/map_picker_bg"
-        android:padding="8dp"
-        android:visibility="gone">
+        android:layout_marginBottom="4dp"
+        android:layout_marginStart="4dp">
 
-        <TextView
-            android:id="@+id/modeSatelliteRoad"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="卫星+路网"
-            android:textColor="#FFFFFF"
-            android:textSize="14sp"
-            android:padding="8dp"
-            android:background="?attr/selectableItemBackground" />
+        <WebView
+            android:id="@+id/stickerLeft"
+            android:layout_width="70dp"
+            android:layout_height="70dp" />
+    </FrameLayout>
 
-        <TextView
-            android:id="@+id/modeSatellite"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="卫星"
-            android:textColor="#FFFFFF"
-            android:textSize="14sp"
-            android:padding="8dp"
-            android:background="?attr/selectableItemBackground" />
-
-        <TextView
-            android:id="@+id/modeStandard"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="标准"
-            android:textColor="#FFFFFF"
-            android:textSize="14sp"
-            android:padding="8dp"
-            android:background="?attr/selectableItemBackground" />
-    </LinearLayout>
-
-    <!-- 选点模式控制 -->
-    <LinearLayout
-        android:id="@+id/pickModeControls"
-        android:layout_width="match_parent"
+    <!-- 右下角贴纸：WebP -->
+    <FrameLayout
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
-        android:orientation="horizontal"
+        android:layout_gravity="bottom|end"
+        android:layout_marginBottom="4dp"
+        android:layout_marginEnd="4dp">
+
+        <WebView
+            android:id="@+id/stickerRight"
+            android:layout_width="72dp"
+            android:layout_height="105dp" />
+    </FrameLayout>
+
+    <!-- 地图样式选择弹出面板 -->
+    <LinearLayout
+        android:id="@+id/mapStyleMenu"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="56dp"
+        android:background="@drawable/map_picker_bg"
         android:gravity="center"
-        android:background="#CC000000"
-        android:padding="12dp"
+        android:orientation="horizontal"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
         android:visibility="gone">
 
         <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="拖动地图选择位置"
+            android:id="@+id/optSatellite"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackground"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:text="🛰 卫星"
+            android:textSize="13sp"
             android:textColor="#FFFFFF"
-            android:textSize="16sp" />
+            android:gravity="center" />
 
-        <Button
-            android:id="@+id/btnCancelPick"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="取消"
-            android:layout_marginEnd="8dp" />
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="#33FFFFFF" />
 
-        <Button
-            android:id="@+id/btnConfirmPick"
+        <TextView
+            android:id="@+id/optSatRoad"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="确认" />
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackground"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:text="🛣 卫星+路网"
+            android:textSize="13sp"
+            android:textColor="#FFFFFF"
+            android:gravity="center" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="#33FFFFFF" />
+
+        <TextView
+            android:id="@+id/optStandard"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackground"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:text="🗺 标准"
+            android:textSize="13sp"
+            android:textColor="#FFFFFF"
+            android:gravity="center" />
     </LinearLayout>
 
-    <!-- 准星覆盖层 -->
-    <View
+    <!-- 选点准星（居中，仅在选点模式显示） -->
+    <FrameLayout
         android:id="@+id/crosshairOverlay"
-        android:layout_width="1dp"
-        android:layout_height="1dp"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
         android:layout_gravity="center"
-        android:visibility="gone" />
+        android:visibility="gone">
 
-    <!-- 选点提示 -->
+        <!-- 外圈 -->
+        <View
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_gravity="center"
+            android:background="@drawable/crosshair_ring" />
+        <!-- 中心点 -->
+        <View
+            android:layout_width="8dp"
+            android:layout_height="8dp"
+            android:layout_gravity="center"
+            android:background="@drawable/crosshair_dot" />
+    </FrameLayout>
+
+    <!-- 选点模式提示文字 -->
     <TextView
         android:id="@+id/pickerHint"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="top|center_horizontal"
-        android:layout_marginTop="60dp"
+        android:layout_marginTop="70dp"
+        android:background="@drawable/panel_bg"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
         android:text="拖动地图选择目的地"
         android:textColor="#FFFFFF"
-        android:textSize="16sp"
-        android:background="#CC000000"
-        android:padding="12dp"
+        android:textSize="14sp"
+        android:textStyle="bold"
         android:visibility="gone" />
 
-    <!-- 选点按钮栏 -->
+    <!-- 选点模式确认/取消按钮栏 -->
     <LinearLayout
         android:id="@+id/pickerButtons"
-        android:layout_width="match_parent"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
-        android:orientation="horizontal"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="0dp"
+        android:background="@drawable/zoom_dock_bg"
         android:gravity="center"
-        android:background="#CC000000"
-        android:padding="12dp"
+        android:orientation="horizontal"
+        android:paddingStart="6dp"
+        android:paddingEnd="6dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="6dp"
         android:visibility="gone">
 
-        <Button
+        <TextView
             android:id="@+id/btnPickerCancel"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackground"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
             android:text="取消"
-            android:layout_marginEnd="16dp" />
+            android:textSize="15sp"
+            android:textColor="#FF6B6B"
+            android:gravity="center"
+            android:textStyle="bold" />
 
-        <Button
+        <View
+            android:layout_width="1dp"
+            android:layout_height="32dp"
+            android:background="#33FFFFFF" />
+
+        <TextView
             android:id="@+id/btnPickerConfirm"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="确认" />
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackground"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:text="确定"
+            android:textSize="15sp"
+            android:textColor="#4FC3F7"
+            android:gravity="center"
+            android:textStyle="bold" />
     </LinearLayout>
-
-    <!-- 左下角贴纸 -->
-    <WebView
-        android:id="@+id/stickerLeft"
-        android:layout_width="80dp"
-        android:layout_height="80dp"
-        android:layout_gravity="bottom|start"
-        android:layout_marginStart="4dp"
-        android:layout_marginBottom="4dp" />
-
-    <!-- 右下角贴纸 -->
-    <WebView
-        android:id="@+id/stickerRight"
-        android:layout_width="72dp"
-        android:layout_height="105dp"
-        android:layout_gravity="bottom|end"
-        android:layout_marginEnd="4dp"
-        android:layout_marginBottom="4dp" />
 
 </FrameLayout>
