@@ -106,6 +106,9 @@ class MainActivity : AppCompatActivity() {
     // === 背景音乐 ===
     private var bgmManager: BgmManager? = null
 
+    // === 突围引擎 ===
+    private var breakoutEngine: BreakoutEngine? = null
+
     // === 持续道路吸附 ===
     private var lastRoadSnapTime = 0L
     private val ROAD_SNAP_INTERVAL = 500L  // 每500ms吸附一次
@@ -373,8 +376,12 @@ class MainActivity : AppCompatActivity() {
             confirmPickedDestination()
         }
         findViewById<TextView>(R.id.btnPickerCancel).setOnClickListener {
+            breakoutEngine?.reset()
             exitPickerMode()
         }
+
+        // 进入选点阶段（触发 BGM）
+        breakoutEngine?.startPicking()
     }
 
     private fun confirmPickedDestination() {
@@ -395,8 +402,11 @@ class MainActivity : AppCompatActivity() {
 
         exitPickerMode()
         
-        // 开始播放追逐音乐
-        bgmManager?.startChaseMusic()
+        // 启动突围引擎（使用当前位置作为起点）
+        val loc = interpolatedProvider?.lastKnownLocation
+        if (loc != null) {
+            breakoutEngine?.startBreakout(loc.latitude, loc.longitude, destLat, destLng)
+        }
     }
 
     private fun exitPickerMode() {
@@ -500,6 +510,18 @@ class MainActivity : AppCompatActivity() {
         setupRoadManager()
         setupInertialNavigation()
         bgmManager = BgmManager(this)
+        breakoutEngine = BreakoutEngine(handler).apply {
+            onStateChanged = { state ->
+                when (state) {
+                    BreakoutEngine.State.PICKING -> bgmManager?.enterPicking()
+                    BreakoutEngine.State.BREAKOUT -> bgmManager?.enterBreakout()
+                    BreakoutEngine.State.HIGH_PRESS -> bgmManager?.enterHighPressure()
+                    BreakoutEngine.State.VICTORY -> bgmManager?.playVictory()
+                    BreakoutEngine.State.ARRESTED -> bgmManager?.playArrested()
+                    BreakoutEngine.State.IDLE -> bgmManager?.enterIdle()
+                }
+            }
+        }
         startHudUpdater()
         startCameraSystem()
     }
@@ -651,6 +673,10 @@ class MainActivity : AppCompatActivity() {
             }
             lastRoadSnapTime = now
         }
+
+        // === 突围引擎更新（如果有活跃游戏）===
+        breakoutEngine?.updatePlayer(displayLat, displayLng, gpsBearing.toDouble())
+        breakoutEngine?.checkArrest(displayLat, displayLng)
 
         // === 位置跟随（始终执行，不受锁定影响）===
         val distM = haversine(lastFollowLat, lastFollowLng, displayLat, displayLng)
@@ -851,6 +877,7 @@ class MainActivity : AppCompatActivity() {
         roadManager?.destroy()
         inertialManager?.destroy()
         bgmManager?.release()
+        breakoutEngine?.reset()
         handler.removeCallbacksAndMessages(null)
     }
 }
