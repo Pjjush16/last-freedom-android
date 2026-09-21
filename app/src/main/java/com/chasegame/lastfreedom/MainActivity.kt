@@ -24,6 +24,7 @@ import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.MapTileIndex
 import org.osmdroid.views.overlay.TilesOverlay
 import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.Polyline
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
@@ -86,6 +87,12 @@ class MainActivity : AppCompatActivity() {
     private var roadManager: RoadOverlayManager? = null
     private var pickedDestMarker: Marker? = null
     private lateinit var prefs: SharedPreferences
+
+    // === 路线预览 ===
+    private var routePreviewLine: Polyline? = null
+    private var pendingDestLat = 0.0
+    private var pendingDestLng = 0.0
+    private var routePreviewActive = false
 
     // === 速度→缩放迟滞（死区）===
     // zoom 变化需要速度持续 3 秒超过/低于阈值才执行，避免阈值边界"喘气"
@@ -385,25 +392,33 @@ class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.zoomDock).visibility = View.GONE
 
         // 设置确认/取消按钮
+        findViewById<TextView>(R.id.btnPickerConfirm).text = "确定"
+        findViewById<TextView>(R.id.btnPickerConfirm).setTextColor(0xFF4FC3F7.toInt())
         findViewById<TextView>(R.id.btnPickerConfirm).setOnClickListener {
             confirmPickedDestination()
         }
         findViewById<TextView>(R.id.btnPickerCancel).setOnClickListener {
-            breakoutEngine?.reset()
             exitPickerMode()
         }
-
-        // 进入选点阶段（触发 BGM）
-        breakoutEngine?.startPicking()
     }
 
     private fun confirmPickedDestination() {
-        // 获取地图中心点坐标
+        // 获取地图中心点坐标（用户选的目的地）
         val center = map.mapCenter as GeoPoint
         val destLat = center.latitude
         val destLng = center.longitude
 
-        // 放置目的地标记（用户选点不吸附到道路，使用原始坐标）
+        // 获取当前位置
+        val loc = interpolatedProvider?.lastKnownLocation
+        if (loc == null) {
+            exitPickerMode()
+            return
+        }
+
+        pendingDestLat = destLat
+        pendingDestLng = destLng
+
+        // 放置目的地标记
         pickedDestMarker?.let { map.overlays.remove(it) }
         pickedDestMarker = Marker(map).apply {
             position = GeoPoint(destLat, destLng)
@@ -411,19 +426,91 @@ class MainActivity : AppCompatActivity() {
             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
         }
         map.overlays.add(pickedDestMarker)
+
+        // 画红色路线连接当前位置和目的地
+        routePreviewLine?.let { map.overlays.remove(it) }
+        routePreviewLine = Polyline().apply {
+            setPoints(listOf(GeoPoint(loc.latitude, loc.longitude), GeoPoint(destLat, destLng)))
+            outlinePaint.color = 0xCCFF3333.toInt()
+            outlinePaint.strokeWidth = 6f
+            outlinePaint.isAntiAlias = true
+        }
+        map.overlays.add(routePreviewLine)
+        map.invalidate()
+
+        // 自动缩放地图让两点都在屏幕内
+        val distM = haversine(loc.latitude, loc.longitude, destLat, destLng)
+        val targetZoom = when {
+            distM > 20000 -> 11.0
+            distM > 10000 -> 12.0
+            distM > 5000 -> 13.0
+            distM > 2000 -> 14.0
+            distM > 1000 -> 15.0
+            else -> 16.0
+        }
+        val midLat = (loc.latitude + destLat) / 2.0
+        val midLng = (loc.longitude + destLng) / 2.0
+        map.controller.animateTo(GeoPoint(midLat, midLng), targetZoom, 800L)
+
+        // 切换到出发预览模式
+        routePreviewActive = true
+        findViewById<View>(R.id.crosshairOverlay).visibility = View.GONE
+        findViewById<View>(R.id.pickerHint).let {
+            (it as TextView).text = "确认路线后点击出发"
+        }
+        findViewById<TextView>(R.id.btnPickerConfirm).text = "出发"
+        findViewById<TextView>(R.id.btnPickerConfirm).setTextColor(0xFF44FF44.toInt())
+        findViewById<TextView>(R.id.btnPickerConfirm).setOnClickListener {
+            departFromPreview()
+        }
+        findViewById<TextView>(R.id.btnPickerCancel).setOnClickListener {
+            clearRoutePreview()
+            // 回到选点模式（准星重新显示）
+            findViewById<View>(R.id.crosshairOverlay).visibility = View.VISIBLE
+            (findViewById<View>(R.id.pickerHint) as TextView).text = "拖动地图选择目的地"
+            findViewById<TextView>(R.id.btnPickerConfirm).text = "确定"
+            findViewById<TextView>(R.id.btnPickerConfirm).setTextColor(0xFF4FC3F7.toInt())
+            findViewById<TextView>(R.id.btnPickerConfirm).setOnClickListener {
+                confirmPickedDestination()
+            }
+            findViewById<TextView>(R.id.btnPickerCancel).setOnClickListener {
+                exitPickerMode()
+            }
+            routePreviewActive = false
+        }
+    }
+
+    private fun clearRoutePreview() {
+        routePreviewLine?.let { map.overlays.remove(it) }
+        routePreviewLine = null
+        pickedDestMarker?.let { map.overlays.remove(it) }
+        pickedDestMarker = null
+        map.invalidate()
+    }
+
+    private fun departFromPreview() {
+        // 清除预览线条（保留目的地标记）
+        routePreviewLine?.let { map.overlays.remove(it) }
+        routePreviewLine = null
         map.invalidate()
 
         exitPickerMode()
-        
-        // 启动突围引擎（使用当前位置作为起点）
+        routePreviewActive = false
+
+        // 启动突围引擎
         val loc = interpolatedProvider?.lastKnownLocation
         if (loc != null) {
-            breakoutEngine?.startBreakout(loc.latitude, loc.longitude, destLat, destLng)
+            breakoutEngine?.startBreakout(loc.latitude, loc.longitude, pendingDestLat, pendingDestLng)
         }
     }
 
     private fun exitPickerMode() {
         pickerModeActive = false
+        routePreviewActive = false
+
+        // 清除路线预览
+        routePreviewLine?.let { map.overlays.remove(it) }
+        routePreviewLine = null
 
         // 隐藏准星 + 提示 + 按钮
         findViewById<View>(R.id.crosshairOverlay).visibility = View.GONE
@@ -539,6 +626,7 @@ class MainActivity : AppCompatActivity() {
         setupRoadManager()
         setupInertialNavigation()
         bgmManager = BgmManager(this)
+        bgmManager?.enterPicking()  // 从启动就开始播放漫游音乐
         breakoutEngine = BreakoutEngine(handler).apply {
             onStateChanged = { state ->
                 handler.post {
