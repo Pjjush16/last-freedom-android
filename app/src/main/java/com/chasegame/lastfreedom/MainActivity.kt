@@ -113,6 +113,9 @@ class MainActivity : AppCompatActivity() {
     // === 背景音乐 ===
     private var bgmManager: BgmManager? = null
 
+    // === AI 评分模型 ===
+    private var scoringModel: ScoringModel? = null
+
     // === 突围引擎 ===
     private var breakoutEngine: BreakoutEngine? = null
 
@@ -627,6 +630,7 @@ class MainActivity : AppCompatActivity() {
         setupInertialNavigation()
         bgmManager = BgmManager(this)
         bgmManager?.enterPicking()  // 从启动就开始播放漫游音乐
+        scoringModel = ScoringModel(this)
         breakoutEngine = BreakoutEngine(handler).apply {
             onStateChanged = { state ->
                 handler.post {
@@ -661,27 +665,55 @@ class MainActivity : AppCompatActivity() {
                         }
                         BreakoutEngine.State.VICTORY -> {
                             bgmManager?.playVictory()
-                            tvBreakoutInfo.text = "消星成功"
-                            tvBreakoutInfo.setTextColor(0xFF44FF44.toInt())
                             btnAbandon.visibility = View.GONE
+                            val score = scoringModel?.scoreRound(
+                                true,
+                                breakoutEngine?.getElapsedSeconds() ?: 0,
+                                breakoutEngine?.getTotalDistanceM() ?: 0.0,
+                                interpolatedProvider?.getMaxSpeedKmh() ?: 0f
+                            )
+                            val stars = if (score != null) "★".repeat(score.stars) + "☆".repeat(5 - score.stars) else ""
+                            tvBreakoutInfo.text = "消星成功\n$stars\n战力: ${score?.compositeScore ?: 0}"
+                            tvBreakoutInfo.setTextColor(0xFF44FF44.toInt())
                         }
                         BreakoutEngine.State.ARRESTED -> {
                             bgmManager?.playArrested()
-                            tvBreakoutInfo.text = "被捕"
-                            tvBreakoutInfo.setTextColor(0xFFFF4444.toInt())
                             btnAbandon.visibility = View.GONE
+                            val score = scoringModel?.scoreRound(
+                                false,
+                                breakoutEngine?.getElapsedSeconds() ?: 0,
+                                breakoutEngine?.getTotalDistanceM() ?: 0.0,
+                                interpolatedProvider?.getMaxSpeedKmh() ?: 0f
+                            )
+                            val stars = if (score != null) "★".repeat(score.stars) + "☆".repeat(5 - score.stars) else ""
+                            tvBreakoutInfo.text = "被捕\n$stars\n战力: ${score?.compositeScore ?: 0}"
+                            tvBreakoutInfo.setTextColor(0xFFFF4444.toInt())
                         }
                         BreakoutEngine.State.BLOCKED -> {
                             bgmManager?.playArrested()
-                            tvBreakoutInfo.text = "被封锁"
-                            tvBreakoutInfo.setTextColor(0xFFFF6600.toInt())
                             btnAbandon.visibility = View.GONE
+                            val score = scoringModel?.scoreRound(
+                                false,
+                                breakoutEngine?.getElapsedSeconds() ?: 0,
+                                breakoutEngine?.getTotalDistanceM() ?: 0.0,
+                                interpolatedProvider?.getMaxSpeedKmh() ?: 0f
+                            )
+                            val stars = if (score != null) "★".repeat(score.stars) + "☆".repeat(5 - score.stars) else ""
+                            tvBreakoutInfo.text = "被封锁\n$stars\n战力: ${score?.compositeScore ?: 0}"
+                            tvBreakoutInfo.setTextColor(0xFFFF6600.toInt())
                         }
                         BreakoutEngine.State.TIMEOUT -> {
                             bgmManager?.playArrested()
-                            tvBreakoutInfo.text = "超时"
-                            tvBreakoutInfo.setTextColor(0xFFFF8800.toInt())
                             btnAbandon.visibility = View.GONE
+                            val score = scoringModel?.scoreRound(
+                                false,
+                                breakoutEngine?.getElapsedSeconds() ?: 0,
+                                breakoutEngine?.getTotalDistanceM() ?: 0.0,
+                                interpolatedProvider?.getMaxSpeedKmh() ?: 0f
+                            )
+                            val stars = if (score != null) "★".repeat(score.stars) + "☆".repeat(5 - score.stars) else ""
+                            tvBreakoutInfo.text = "超时\n$stars\n战力: ${score?.compositeScore ?: 0}"
+                            tvBreakoutInfo.setTextColor(0xFFFF8800.toInt())
                         }
                     }
                 }

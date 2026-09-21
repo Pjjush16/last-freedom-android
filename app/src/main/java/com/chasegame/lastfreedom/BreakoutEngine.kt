@@ -110,6 +110,9 @@ class BreakoutEngine(
     var elapsedSec = 0; private set
     var timeLimitSec = 300  // 默认5分钟
 
+    fun getElapsedSeconds(): Long = elapsedSec.toLong()
+    fun getTotalDistanceM(): Double = pathDistance
+
     // === 方向追踪 ===
     private var lastBearing = 0.0
     private var hasLastBearing = false

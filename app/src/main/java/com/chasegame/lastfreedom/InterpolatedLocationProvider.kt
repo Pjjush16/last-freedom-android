@@ -45,6 +45,7 @@ class InterpolatedLocationProvider(private val context: Context) :
     private var currentLng: Double = 0.0
     private var currentBearing: Float = 0f
     private var currentSpeedKmh: Float = 0f
+    private var maxSpeedKmh: Float = 0f
     private var hasFix: Boolean = false
 
     // 上一帧的 wall-clock 时间，用于计算 dt
@@ -119,6 +120,7 @@ class InterpolatedLocationProvider(private val context: Context) :
 
     /** 当前平滑速度（km/h），供 HUD 直接读取 */
     fun getSmoothedSpeedKmh(): Float = currentSpeedKmh
+    fun getMaxSpeedKmh(): Float = maxSpeedKmh
 
     /** 当前平滑方向（度），供外部读取 */
     fun getSmoothedBearing(): Float = currentBearing
@@ -149,6 +151,7 @@ class InterpolatedLocationProvider(private val context: Context) :
         if (location.hasSpeed()) {
             currentSpeedKmh = emaFloat(currentSpeedKmh, location.speed * 3.6f, speedAlpha)
         }
+        if (currentSpeedKmh > maxSpeedKmh) maxSpeedKmh = currentSpeedKmh
 
         // 更新方向（EMA 平滑，从 prevGps 到当前点的方位角）
         val prev = prevGps
