@@ -223,6 +223,4 @@ class AIScoringModel(context: Context) {
 
     fun getTotalPower(): Int = cumulativePower
     fun getWinRate(): Double = if (totalRounds > 0) totalWins.toDouble() / totalRounds else 0.0
-    fun getTotalRounds(): Int = totalRounds
-    fun getMaxStars(): Int = maxStars
 }
