@@ -109,6 +109,18 @@ class MainActivity : AppCompatActivity() {
     // === 突围引擎 ===
     private var breakoutEngine: BreakoutEngine? = null
 
+    // === 突围 HUD 控件 ===
+    private lateinit var tvBreakoutInfo: TextView
+    private lateinit var tvConfidence: TextView
+    private lateinit var tvShrinkRadius: TextView
+    private lateinit var tvVisibility: TextView
+    private lateinit var tvTimer: TextView
+    private lateinit var btnAbandon: TextView
+    private lateinit var breakoutHud: View
+
+    // === 路障地图标记 ===
+    private val barricadeMarkers = mutableListOf<Marker>()
+
     // === 持续道路吸附 ===
     private var lastRoadSnapTime = 0L
     private val ROAD_SNAP_INTERVAL = 500L  // 每500ms吸附一次
@@ -134,6 +146,7 @@ class MainActivity : AppCompatActivity() {
         setupMapStyleMenu()
         roadManager = RoadOverlayManager(map, handler)
         setupStickers()
+        setupBreakoutHud()
         requestPermissions()
     }
 
@@ -426,6 +439,22 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // === 突围 HUD 设置 ===
+    private fun setupBreakoutHud() {
+        breakoutHud = findViewById(R.id.breakoutHud)
+        tvBreakoutInfo = findViewById(R.id.tvBreakoutInfo)
+        tvConfidence = findViewById(R.id.tvConfidence)
+        tvShrinkRadius = findViewById(R.id.tvShrinkRadius)
+        tvVisibility = findViewById(R.id.tvVisibility)
+        tvTimer = findViewById(R.id.tvTimer)
+        btnAbandon = findViewById(R.id.btnAbandon)
+
+        btnAbandon.setOnClickListener {
+            val loc = interpolatedProvider?.lastKnownLocation ?: return@setOnClickListener
+            breakoutEngine?.abandonVehicle(loc.latitude, loc.longitude)
+        }
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     private fun setupStickers() {
         // 右下角贴纸（WebP 动画）
@@ -512,13 +541,104 @@ class MainActivity : AppCompatActivity() {
         bgmManager = BgmManager(this)
         breakoutEngine = BreakoutEngine(handler).apply {
             onStateChanged = { state ->
-                when (state) {
-                    BreakoutEngine.State.PICKING -> bgmManager?.enterPicking()
-                    BreakoutEngine.State.BREAKOUT -> bgmManager?.enterBreakout()
-                    BreakoutEngine.State.HIGH_PRESS -> bgmManager?.enterHighPressure()
-                    BreakoutEngine.State.VICTORY -> bgmManager?.playVictory()
-                    BreakoutEngine.State.ARRESTED -> bgmManager?.playArrested()
-                    BreakoutEngine.State.IDLE -> bgmManager?.enterIdle()
+                handler.post {
+                    when (state) {
+                        BreakoutEngine.State.IDLE -> {
+                            bgmManager?.enterIdle()
+                            breakoutHud.visibility = View.GONE
+                            btnAbandon.visibility = View.GONE
+                            clearBarricadeMarkers()
+                        }
+                        BreakoutEngine.State.PICKING -> {
+                            bgmManager?.enterPicking()
+                            breakoutHud.visibility = View.GONE
+                            btnAbandon.visibility = View.GONE
+                        }
+                        BreakoutEngine.State.BREAKOUT -> {
+                            bgmManager?.enterBreakout()
+                            breakoutHud.visibility = View.VISIBLE
+                        }
+                        BreakoutEngine.State.HIGH_PRESS -> {
+                            bgmManager?.enterHighPressure()
+                            breakoutHud.visibility = View.VISIBLE
+                            tvBreakoutInfo.text = "高压区"
+                            tvBreakoutInfo.setTextColor(0xFFFF2222.toInt())
+                        }
+                        BreakoutEngine.State.ABANDONED -> {
+                            bgmManager?.enterBreakout()
+                            breakoutHud.visibility = View.VISIBLE
+                            btnAbandon.visibility = View.GONE
+                            tvBreakoutInfo.text = "潜行中"
+                            tvBreakoutInfo.setTextColor(0xFF88FF88.toInt())
+                        }
+                        BreakoutEngine.State.VICTORY -> {
+                            bgmManager?.playVictory()
+                            tvBreakoutInfo.text = "消星成功"
+                            tvBreakoutInfo.setTextColor(0xFF44FF44.toInt())
+                            btnAbandon.visibility = View.GONE
+                        }
+                        BreakoutEngine.State.ARRESTED -> {
+                            bgmManager?.playArrested()
+                            tvBreakoutInfo.text = "被捕"
+                            tvBreakoutInfo.setTextColor(0xFFFF4444.toInt())
+                            btnAbandon.visibility = View.GONE
+                        }
+                        BreakoutEngine.State.BLOCKED -> {
+                            bgmManager?.playArrested()
+                            tvBreakoutInfo.text = "被封锁"
+                            tvBreakoutInfo.setTextColor(0xFFFF6600.toInt())
+                            btnAbandon.visibility = View.GONE
+                        }
+                        BreakoutEngine.State.TIMEOUT -> {
+                            bgmManager?.playArrested()
+                            tvBreakoutInfo.text = "超时"
+                            tvBreakoutInfo.setTextColor(0xFFFF8800.toInt())
+                            btnAbandon.visibility = View.GONE
+                        }
+                    }
+                }
+            }
+            onBarricadesChanged = { barricades ->
+                handler.post { updateBarricadeMarkers(barricades) }
+            }
+            onHudUpdate = { hud ->
+                handler.post {
+                    val confPct = (hud.confidence * 100).toInt()
+                    tvConfidence.text = "置信度: $confPct%"
+                    tvConfidence.setTextColor(when {
+                        confPct > 70 -> 0xFFFF2222.toInt()
+                        confPct > 40 -> 0xFFFFAA00.toInt()
+                        else -> 0xFF44FF44.toInt()
+                    })
+
+                    val radiusKm = hud.shrinkRadius / 1000.0
+                    tvShrinkRadius.text = String.format("包围圈: %.1fkm", radiusKm)
+
+                    val visLabel = when (hud.visibility) {
+                        BreakoutEngine.VisibilityLevel.BLIND -> "盲堵"
+                        BreakoutEngine.VisibilityLevel.PRECISE -> "精准封锁"
+                        BreakoutEngine.VisibilityLevel.INTERCEPT -> "前方拦截"
+                    }
+                    tvVisibility.text = "可见性: $visLabel"
+                    tvVisibility.setTextColor(when (hud.visibility) {
+                        BreakoutEngine.VisibilityLevel.INTERCEPT -> 0xFFFF2222.toInt()
+                        BreakoutEngine.VisibilityLevel.PRECISE -> 0xFFFF8800.toInt()
+                        else -> 0xFFAAAAAA.toInt()
+                    })
+
+                    val eMin = hud.elapsedSec / 60
+                    val eSec = hud.elapsedSec % 60
+                    val tMin = hud.timeLimitSec / 60
+                    val tSec = hud.timeLimitSec % 60
+                    tvTimer.text = String.format("%02d:%02d / %02d:%02d", eMin, eSec, tMin, tSec)
+
+                    // 弃车按钮：突围中且距离终点 < 300m 时显示
+                    if ((hud.state == BreakoutEngine.State.BREAKOUT || hud.state == BreakoutEngine.State.HIGH_PRESS)
+                        && hud.distToDest < 300.0 && !hud.isAbandoned) {
+                        btnAbandon.visibility = View.VISIBLE
+                    } else if (hud.state != BreakoutEngine.State.ABANDONED) {
+                        btnAbandon.visibility = View.GONE
+                    }
                 }
             }
         }
@@ -855,6 +975,66 @@ class MainActivity : AppCompatActivity() {
                 cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) *
                 sin(dLng / 2) * sin(dLng / 2)
         return R * 2 * atan2(sqrt(a), sqrt(1 - a))
+    }
+
+    // === 路障地图标记渲染 ===
+
+    private fun updateBarricadeMarkers(barricades: List<BreakoutEngine.Barricade>) {
+        // 清除旧标记
+        clearBarricadeMarkers()
+
+        for (b in barricades) {
+            if (!b.active) continue
+            val marker = Marker(map)
+            marker.position = GeoPoint(b.lat, b.lng)
+            marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+
+            when (b.type) {
+                BreakoutEngine.BarricadeType.PATROL -> {
+                    marker.title = "巡逻车"
+                    marker.snippet = "入径 #${b.routeIndex + 1}"
+                    // 红色圆点表示巡逻车
+                    val shape = android.graphics.drawable.GradientDrawable().apply {
+                        shape = android.graphics.drawable.GradientDrawable.OVAL
+                        setColor(0xCCFF4444.toInt())
+                        setSize(24, 24)
+                        setStroke(2, 0xFFFFFFFF.toInt())
+                    }
+                    marker.icon = shape
+                }
+                BreakoutEngine.BarricadeType.BARRIER -> {
+                    marker.title = "路障"
+                    val shape = android.graphics.drawable.GradientDrawable().apply {
+                        shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                        setColor(0xCCFF8800.toInt())
+                        setSize(20, 8)
+                        setStroke(1, 0xFFFFFFFF.toInt())
+                    }
+                    marker.icon = shape
+                }
+                BreakoutEngine.BarricadeType.INTERCEPT -> {
+                    marker.title = "拦截车"
+                    val shape = android.graphics.drawable.GradientDrawable().apply {
+                        shape = android.graphics.drawable.GradientDrawable.OVAL
+                        setColor(0xCCFF0000.toInt())
+                        setSize(28, 28)
+                        setStroke(3, 0xFFFF0000.toInt())
+                    }
+                    marker.icon = shape
+                }
+            }
+
+            map.overlays.add(marker)
+            barricadeMarkers.add(marker)
+        }
+        map.invalidate()
+    }
+
+    private fun clearBarricadeMarkers() {
+        for (m in barricadeMarkers) {
+            map.overlays.remove(m)
+        }
+        barricadeMarkers.clear()
     }
 
     // === 生命周期 ===

@@ -396,4 +396,79 @@
             android:textStyle="bold" />
     </LinearLayout>
 
+    <!-- 突围 HUD（左侧中部） -->
+    <LinearLayout
+        android:id="@+id/breakoutHud"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="start|center_vertical"
+        android:layout_marginStart="8dp"
+        android:background="#B0000000"
+        android:orientation="vertical"
+        android:padding="8dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tvBreakoutInfo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="突围"
+            android:textColor="#FF4444"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvConfidence"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="置信度: 30%"
+            android:textColor="#FFAA00"
+            android:textSize="11sp"
+            android:fontFamily="monospace" />
+
+        <TextView
+            android:id="@+id/tvShrinkRadius"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="包围圈: --"
+            android:textColor="#FF6666"
+            android:textSize="11sp"
+            android:fontFamily="monospace" />
+
+        <TextView
+            android:id="@+id/tvVisibility"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="可见性: 盲堵"
+            android:textColor="#AAAAAA"
+            android:textSize="11sp"
+            android:fontFamily="monospace" />
+
+        <TextView
+            android:id="@+id/tvTimer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="00:00 / 05:00"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp"
+            android:fontFamily="monospace" />
+    </LinearLayout>
+
+    <!-- 弃车按钮（底部中央偏上） -->
+    <TextView
+        android:id="@+id/btnAbandon"
+        android:layout_width="wrap_content"
+        android:layout_height="44dp"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="120dp"
+        android:background="#CCFF4444"
+        android:gravity="center"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:text="弃车潜行"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
 </FrameLayout>
