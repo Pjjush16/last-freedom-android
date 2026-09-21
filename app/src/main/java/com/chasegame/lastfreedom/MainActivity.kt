@@ -796,7 +796,6 @@ class MainActivity : AppCompatActivity() {
 
         // === 突围引擎更新（如果有活跃游戏）===
         breakoutEngine?.updatePlayer(displayLat, displayLng, gpsBearing.toDouble())
-        breakoutEngine?.checkArrest(displayLat, displayLng)
 
         // === 位置跟随（始终执行，不受锁定影响）===
         val distM = haversine(lastFollowLat, lastFollowLng, displayLat, displayLng)
