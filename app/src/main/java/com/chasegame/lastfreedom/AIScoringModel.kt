@@ -123,8 +123,8 @@ class AIScoringModel(context: Context) {
             (maxStars / 10.0f).coerceIn(0f, 1f),
             (maxSpeedKmh / 120.0f).coerceIn(0f, 1f),
             (avgSpeedKmh / 120.0f).coerceIn(0f, 1f),
-            (distanceM / 10000.0f).coerceIn(0f, 1f),
-            (durationSec / 600.0f).coerceIn(0f, 1f),
+            (distanceM.toFloat() / 10000.0f).coerceIn(0f, 1f),
+            (durationSec.toFloat() / 600.0f).coerceIn(0f, 1f),
             ((tortuosity - 1.0).toFloat() / 2.0f).coerceIn(0f, 1f),
             routeEff.toFloat().coerceIn(0f, 1f)
         )
@@ -189,8 +189,8 @@ class AIScoringModel(context: Context) {
             (maxStars / 10.0f).coerceIn(0f, 1f),
             (currentSpeedKmh / 120.0f).coerceIn(0f, 1f),
             (avgSpeedKmh / 120.0f).coerceIn(0f, 1f),
-            (distanceM / 10000.0f).coerceIn(0f, 1f),
-            (durationSec / 600.0f).coerceIn(0f, 1f),
+            (distanceM.toFloat() / 10000.0f).coerceIn(0f, 1f),
+            (durationSec.toFloat() / 600.0f).coerceIn(0f, 1f),
             ((tortuosity - 1.0).toFloat() / 2.0f).coerceIn(0f, 1f),
             routeEff.toFloat().coerceIn(0f, 1f)
         )
