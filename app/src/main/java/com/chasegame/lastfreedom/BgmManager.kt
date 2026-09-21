@@ -18,7 +18,7 @@ import kotlin.random.Random
  *
  * 阶段二：突围进行中
  *   P2: 追车の小曲 / 全速怕什么怕 / 细妹细狗 (276s) — 默认循环
- *   P7: 英菲尼迪の小曲 / Titanic (187s) — 收缩半径 < 500m 高压区
+ *   P7: 英菲尼迪の小曲 / Titanic (187s) — AI判断可能晋升八星时播放
  *
  * 阶段三：结局
  *   P6: 消星の小曲 / Danza Kuduro (199s) — 胜利，单次播放
@@ -34,7 +34,7 @@ class BgmManager(private val context: Context) {
         IDLE,        // 启动后，未进入选点
         PICKING,     // 选点/出发前
         BREAKOUT,    // 正常突围
-        HIGH_PRESS,  // 高压区 (< 500m)
+        EIGHT_STAR,  // AI判断可能晋升八星
         VICTORY,     // 胜利
         ARRESTED     // 被捕
     }
@@ -64,7 +64,6 @@ class BgmManager(private val context: Context) {
     private val pickingCheckRunnable = object : Runnable {
         override fun run() {
             if (currentPhase == Phase.PICKING) {
-                // 检查当前曲目是否播完
                 val cur = currentBgm
                 if (cur == null || !cur.isPlaying) {
                     playNextPicking()
@@ -113,7 +112,6 @@ class BgmManager(private val context: Context) {
         stopAll()
         currentPhase = Phase.PICKING
 
-        // 打乱选点曲目
         pickingPlaylist.clear()
         listOfNotNull(p1, p3, p5).shuffled().forEach { pickingPlaylist.add(it) }
         pickingIndex = 0
@@ -125,7 +123,6 @@ class BgmManager(private val context: Context) {
     private fun playNextPicking() {
         if (pickingPlaylist.isEmpty()) return
 
-        // 如果当前曲目还在播，不打断
         currentBgm?.let { if (it.isPlaying) return }
 
         val player = pickingPlaylist[pickingIndex % pickingPlaylist.size]
@@ -151,17 +148,23 @@ class BgmManager(private val context: Context) {
         }
     }
 
-    /** 进入高压区：P7 循环 */
-    fun enterHighPressure() {
-        if (currentPhase == Phase.HIGH_PRESS) return
+    /**
+     * AI判断可能晋升八星：切换为 P7 (英菲尼迪の小曲)
+     * 仅在突围阶段(BREAKOUT)时触发，不重复触发
+     */
+    fun enterEightStarMode() {
+        if (currentPhase == Phase.EIGHT_STAR) return
+        if (currentPhase != Phase.BREAKOUT) return  // 只在突围中触发
+
         stopAll()
-        currentPhase = Phase.HIGH_PRESS
+        currentPhase = Phase.EIGHT_STAR
 
         p7?.let {
             it.seekTo(0)
             it.start()
             currentBgm = it
         }
+        Log.i(TAG, "AI判断: 本局可能晋升八星，切换P7音乐")
     }
 
     /** 胜利：P6 单次播放 */

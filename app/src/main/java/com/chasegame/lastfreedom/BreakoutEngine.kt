@@ -5,7 +5,7 @@ import android.os.Looper
 import kotlin.math.*
 
 /**
- * 突围引擎 v2 — 完整 AI 警力部署系统
+ * 突围引擎 v3 — AI 警力部署系统（精简版）
  *
  * 核心机制：
  * 1. 开局预部署：按终点反推 3~5 条入径，每条入径放巡逻车/路障
@@ -13,15 +13,16 @@ import kotlin.math.*
  * 3. 置信度 (0~1)：反复变向降低置信度→兵力分散回主要入口
  * 4. 收缩半径：离终点越近包围圈越小，自动递增难度
  * 5. 三层可见性：盲堵→精准封锁→前方拦截车生成
- * 6. 弃车机制：最后200米可弃车，大幅降低AI精度
- * 7. 三层失败：被拦截/被封锁/超时
- * 8. 曲折度系数：路网距离÷直线距离
+ * 6. 失败：被拦截/超时
+ * 7. 曲折度系数：路网距离÷直线距离
+ *
+ * v3 变更：删除高压圈(HIGH_PRESS)、弃车逃跑(ABANDONED)、封锁(BLOCKED)状态
  */
 class BreakoutEngine(
     private val handler: Handler
 ) {
     enum class State {
-        IDLE, PICKING, BREAKOUT, HIGH_PRESS, ABANDONED, VICTORY, ARRESTED, BLOCKED, TIMEOUT
+        IDLE, PICKING, BREAKOUT, VICTORY, ARRESTED, TIMEOUT
     }
 
     /** 封锁/路障节点 */
@@ -59,7 +60,6 @@ class BreakoutEngine(
         val visibility: VisibilityLevel,
         val elapsedSec: Int,
         val timeLimitSec: Int,
-        val isAbandoned: Boolean,
         val tortuosityIndex: Double,
         val barricadeCount: Int,
         val state: State
@@ -98,12 +98,6 @@ class BreakoutEngine(
     private var visibleDuration = 0.0
     private var invisibleDuration = 0.0
 
-    // === 弃车 ===
-    var isVehicleAbandoned = false
-        private set
-    private var abandonLat = 0.0
-    private var abandonLng = 0.0
-
     // === 计时 ===
     private var gameStartTime = 0L
     private var lastUpdateTime = 0L
@@ -117,10 +111,6 @@ class BreakoutEngine(
     private var lastBearing = 0.0
     private var hasLastBearing = false
     private var directionChangeCount = 0
-
-    // === 封锁判定 ===
-    private var blockedStartTime = 0L
-    private val BLOCKED_DURATION_MS = 5000L  // 高压区持续5秒无法突破 = 被封锁
 
     // === 曲折度 ===
     var tortuosityIndex = 1.0; private set
@@ -136,7 +126,7 @@ class BreakoutEngine(
     // === 游戏循环 ===
     private val updateRunnable = object : Runnable {
         override fun run() {
-            if (state == State.BREAKOUT || state == State.HIGH_PRESS || state == State.ABANDONED) {
+            if (state == State.BREAKOUT) {
                 tickUpdate()
             }
             handler.postDelayed(this, 50) // 20fps
@@ -162,12 +152,9 @@ class BreakoutEngine(
         confidence = 0.3
         visibleDuration = 0.0
         invisibleDuration = 0.0
-        isVehicleAbandoned = false
-        abandonLat = 0.0; abandonLng = 0.0
         hasLastBearing = false
         directionChangeCount = 0
         pathDistance = 0.0
-        blockedStartTime = 0L
         visibilityLevel = VisibilityLevel.BLIND
         lastInterceptSpawnTime = 0L
         barricades.clear()
@@ -203,7 +190,7 @@ class BreakoutEngine(
 
     /** 更新玩家位置 */
     fun updatePlayer(playerLat: Double, playerLng: Double, bearing: Double) {
-        if (state != State.BREAKOUT && state != State.HIGH_PRESS && state != State.ABANDONED) return
+        if (state != State.BREAKOUT) return
 
         val now = System.currentTimeMillis()
         val dt = (now - lastUpdateTime) / 1000.0
@@ -215,9 +202,7 @@ class BreakoutEngine(
 
         // === 累计路径距离 ===
         if (hasLastBearing) {
-            val lastLat = playerLat  // 简化：用当前位置差估算步长
-            val lastLng = playerLng
-            val stepDist = haversine(lastLat, lastLng, playerLat, playerLng)
+            val stepDist = haversine(playerLat, playerLng, playerLat, playerLng)
             pathDistance += stepDist
         }
 
@@ -226,7 +211,6 @@ class BreakoutEngine(
             val dirChange = abs(normalizeAngle(bearing - lastBearing))
             if (dirChange > 60.0) {
                 directionChangeCount++
-                // 大幅变向：置信度骤降
                 if (dirChange > 120.0) {
                     confidence *= 0.6
                 } else {
@@ -251,8 +235,7 @@ class BreakoutEngine(
         updateDynamicBarricades(playerLat, playerLng, bearing, now)
 
         // === 6. 胜利条件 ===
-        val victoryRange = if (isVehicleAbandoned) 50.0 else 100.0
-        if (distToDest < victoryRange) {
+        if (distToDest < 100.0) {
             state = State.VICTORY
             handler.removeCallbacks(updateRunnable)
             onStateChanged?.invoke(state)
@@ -274,21 +257,7 @@ class BreakoutEngine(
             return
         }
 
-        // === 9. 封锁检测 ===
-        checkBlocked(playerLat, playerLng, now)
-
-        // === 10. 状态切换 ===
-        val newState = when {
-            isVehicleAbandoned && distToDest < 200.0 -> State.ABANDONED
-            shrinkRadius < 500.0 -> State.HIGH_PRESS
-            else -> State.BREAKOUT
-        }
-        if (newState != state) {
-            state = newState
-            onStateChanged?.invoke(state)
-        }
-
-        // === 11. 更新曲折度 ===
+        // === 9. 更新曲折度 ===
         val straightDist = haversine(startLat, startLng, destLat, destLng)
         if (straightDist > 0) {
             tortuosityIndex = pathDistance / straightDist
@@ -324,10 +293,9 @@ class BreakoutEngine(
     /** 在每条入径上预部署巡逻车和路障 */
     private fun preDeploy() {
         val dist = haversine(startLat, startLng, destLat, destLng)
-        val deployDist = (dist * 0.6).coerceIn(500.0, 3000.0) // 部署在终点前方 60% 距离处
+        val deployDist = (dist * 0.6).coerceIn(500.0, 3000.0)
 
         for ((idx, approachBearing) in approachBearings.withIndex()) {
-            // 入径上的反方向 = 从终点向外走
             val reverseBearing = normalizeBearing(approachBearing + 180.0)
 
             // 在终点前方 1~2 公里处放巡逻车
@@ -366,25 +334,19 @@ class BreakoutEngine(
             visibleDuration += dt
             invisibleDuration = 0.0
 
-            // 可见性级别递进
             visibilityLevel = when {
                 visibleDuration > 8.0 -> VisibilityLevel.INTERCEPT
                 visibleDuration > 3.0 -> VisibilityLevel.PRECISE
                 else -> VisibilityLevel.BLIND
             }
 
-            // 可见时置信度上升（幅度受弃车影响）
-            val confGain = if (isVehicleAbandoned) 0.03 else 0.08
-            confidence += confGain * dt
+            confidence += 0.08 * dt
         } else {
             invisibleDuration += dt
-            visibleDuration = max(0.0, visibleDuration - dt * 0.5) // 缓慢衰减
+            visibleDuration = max(0.0, visibleDuration - dt * 0.5)
 
-            // 不可见时置信度缓慢下降
-            val confDecay = if (isVehicleAbandoned) 0.06 else 0.02
-            confidence -= confDecay * dt
+            confidence -= 0.02 * dt
 
-            // 长时间不可见 → 回退到盲堵
             if (invisibleDuration > 10.0) {
                 visibilityLevel = VisibilityLevel.BLIND
             }
@@ -395,26 +357,10 @@ class BreakoutEngine(
 
     /** 警力重心惯性漂移 */
     private fun updateGravityCenter(playerLat: Double, playerLng: Double, dt: Double) {
-        // 漂移率 = 基础5% + 置信度×15%，弃车后减半
-        val baseDrift = if (isVehicleAbandoned) 0.025 else 0.05
-        val confDrift = if (isVehicleAbandoned) 0.05 else 0.15
-        val driftRate = baseDrift + confidence * confDrift
+        val driftRate = 0.05 + confidence * 0.15
 
-        // 重心向玩家漂移
-        val targetLat = if (isVehicleAbandoned) {
-            // 弃车后：重心向弃车位置偏移，而不是实时位置
-            abandonLat * 0.3 + playerLat * 0.7
-        } else {
-            playerLat
-        }
-        val targetLng = if (isVehicleAbandoned) {
-            abandonLng * 0.3 + playerLng * 0.7
-        } else {
-            playerLng
-        }
-
-        val deltaLat = (targetLat - gravityLat) * driftRate * dt
-        val deltaLng = (targetLng - gravityLng) * driftRate * dt
+        val deltaLat = (playerLat - gravityLat) * driftRate * dt
+        val deltaLng = (playerLng - gravityLng) * driftRate * dt
         gravityLat += deltaLat
         gravityLng += deltaLng
 
@@ -427,7 +373,6 @@ class BreakoutEngine(
     /** 收缩半径：只缩不扩 */
     private fun updateShrinkRadius(distToDest: Double) {
         val targetRadius = distToDest * 1.5
-        // 收缩半径只缩不扩，最小200米
         shrinkRadius = min(shrinkRadius, max(targetRadius, 200.0))
     }
 
@@ -437,11 +382,9 @@ class BreakoutEngine(
         if (visibilityLevel >= VisibilityLevel.PRECISE && confidence > 0.5) {
             val playerBearingToDest = bearing(playerLat, playerLng, destLat, destLng)
 
-            // 在玩家前方 500~1000 米添加封锁
             val blockDist = 500.0 + confidence * 500.0
             val (blockLat, blockLng) = offsetPoint(playerLat, playerLng, playerBearingToDest, blockDist)
 
-            // 检查是否已有相近位置的封锁
             val tooClose = barricades.any {
                 haversine(it.lat, it.lng, blockLat, blockLng) < 200.0 && it.active
             }
@@ -450,7 +393,7 @@ class BreakoutEngine(
                     lat = blockLat, lng = blockLng,
                     type = BarricadeType.BARRIER,
                     active = true,
-                    routeIndex = -1,  // 动态生成
+                    routeIndex = -1,
                     spawnTime = now
                 ))
                 emitBarricades()
@@ -485,18 +428,16 @@ class BreakoutEngine(
 
     /** 置信度低时，路障回收入径 */
     private fun redistributeBarricades() {
-        // 动态生成的路障（routeIndex < 0）在低置信度时失活
         barricades.filter { it.routeIndex < 0 && it.type != BarricadeType.INTERCEPT }
             .forEach { it.active = false }
     }
 
     // ================================================================
-    //  被捕 / 封锁 / 弃车
+    //  被捕检测
     // ================================================================
 
     /** 被捕检测 */
     private fun checkArrest(playerLat: Double, playerLng: Double): Boolean {
-        // 条件1：撞上路障
         for (b in barricades) {
             if (!b.active) continue
             val dist = haversine(playerLat, playerLng, b.lat, b.lng)
@@ -505,19 +446,7 @@ class BreakoutEngine(
                 BarricadeType.BARRIER -> 30.0
                 BarricadeType.INTERCEPT -> 40.0
             }
-            if (dist < hitRange && state != State.ABANDONED) {
-                state = State.ARRESTED
-                handler.removeCallbacks(updateRunnable)
-                onStateChanged?.invoke(state)
-                emitHud()
-                return true
-            }
-        }
-
-        // 条件2：高压区 + 高置信度 + 接近重心
-        if (state == State.HIGH_PRESS) {
-            val distToGravity = haversine(playerLat, playerLng, gravityLat, gravityLng)
-            if (shrinkRadius < 250.0 && confidence > 0.8 && distToGravity < 300.0) {
+            if (dist < hitRange) {
                 state = State.ARRESTED
                 handler.removeCallbacks(updateRunnable)
                 onStateChanged?.invoke(state)
@@ -526,59 +455,6 @@ class BreakoutEngine(
             }
         }
         return false
-    }
-
-    /** 封锁检测：高压区持续无法突破 */
-    private fun checkBlocked(playerLat: Double, playerLng: Double, now: Long) {
-        if (state != State.HIGH_PRESS) {
-            blockedStartTime = 0L
-            return
-        }
-
-        if (blockedStartTime == 0L) {
-            blockedStartTime = now
-            return
-        }
-
-        // 检查是否被困在高压区超过5秒
-        val distToDest = haversine(playerLat, playerLng, destLat, destLng)
-        if (distToDest > 100.0 && (now - blockedStartTime) > BLOCKED_DURATION_MS) {
-            // 检查所有入径是否都被封锁
-            val activeBarricades = barricades.count { it.active && it.type != BarricadeType.INTERCEPT }
-            if (activeBarricades >= approachBearings.size) {
-                state = State.BLOCKED
-                handler.removeCallbacks(updateRunnable)
-                onStateChanged?.invoke(state)
-                emitHud()
-            } else {
-                blockedStartTime = now // 重置计时器
-            }
-        }
-    }
-
-    /** 弃车：最后 200 米可弃车 */
-    fun abandonVehicle(playerLat: Double, playerLng: Double) {
-        if (state != State.BREAKOUT && state != State.HIGH_PRESS) return
-
-        val distToDest = haversine(playerLat, playerLng, destLat, destLng)
-        if (distToDest > 300.0) return // 太远不能弃车
-
-        isVehicleAbandoned = true
-        abandonLat = playerLat
-        abandonLng = playerLng
-
-        // 弃车后：置信度骤降，拦截车全部消失
-        confidence *= 0.3
-        barricades.removeAll { it.type == BarricadeType.INTERCEPT }
-
-        // 可见性降级
-        visibleDuration = 0.0
-        visibilityLevel = VisibilityLevel.BLIND
-
-        state = State.ABANDONED
-        onStateChanged?.invoke(state)
-        emitBarricades()
-        emitHud()
     }
 
     /** 设置可见性（外部调用：被警车看到） */
@@ -598,12 +474,10 @@ class BreakoutEngine(
         isVisible = false
         visibleDuration = 0.0
         invisibleDuration = 0.0
-        isVehicleAbandoned = false
         barricades.clear()
         approachBearings.clear()
         pathDistance = 0.0
         directionChangeCount = 0
-        blockedStartTime = 0L
         elapsedSec = 0
         onStateChanged?.invoke(state)
         emitBarricades()
@@ -632,18 +506,13 @@ class BreakoutEngine(
     }
 
     private fun emitHud() {
-        val distToDest = haversine(
-            gravityLat, gravityLng,  // 用重心代替玩家位置避免0值
-            destLat, destLng
-        )
         onHudUpdate?.invoke(HudData(
             confidence = confidence,
             shrinkRadius = shrinkRadius,
-            distToDest = shrinkRadius,  // 用收缩半径代替
+            distToDest = shrinkRadius,
             visibility = visibilityLevel,
             elapsedSec = elapsedSec,
             timeLimitSec = timeLimitSec,
-            isAbandoned = isVehicleAbandoned,
             tortuosityIndex = tortuosityIndex,
             barricadeCount = barricades.count { it.active },
             state = state
