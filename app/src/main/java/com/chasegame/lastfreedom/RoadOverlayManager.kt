@@ -39,6 +39,7 @@ class RoadOverlayManager(
     private val reQueryDistanceM = 400.0
 
     private val roadPolylines = mutableListOf<Polyline>()
+    private val polylineTypes = HashMap<Polyline, String>()  // polyline -> "normal"/"major"/"center"
     private var isShowing = false
     private val MIN_ZOOM_FOR_ROADS = 13.0
     private var isVisible = false
@@ -60,16 +61,10 @@ class RoadOverlayManager(
         if (isVisible) {
             val baseW = ((zoom - MIN_ZOOM_FOR_ROADS) / (18.0 - MIN_ZOOM_FOR_ROADS) * 15.0).toFloat().coerceIn(1f, 15f)
             roadPolylines.forEach { pl ->
-                val tag = pl.tag
-                if (tag == "center") {
-                    // 双黄线：细线，固定宽度
-                    pl.outlinePaint.strokeWidth = (baseW * 0.12f).coerceAtLeast(0.5f)
-                } else if (tag == "major") {
-                    // 大路：比基础宽 50%
-                    pl.outlinePaint.strokeWidth = baseW * 1.5f
-                } else {
-                    // 普通路：基础宽度
-                    pl.outlinePaint.strokeWidth = baseW
+                when (polylineTypes[pl]) {
+                    "center" -> pl.outlinePaint.strokeWidth = (baseW * 0.12f).coerceAtLeast(0.5f)
+                    "major" -> pl.outlinePaint.strokeWidth = baseW * 1.5f
+                    else -> pl.outlinePaint.strokeWidth = baseW
                 }
             }
             map.invalidate()
@@ -193,6 +188,7 @@ class RoadOverlayManager(
             roadPolylines.forEach { map.overlays.remove(it) }
         }
         roadPolylines.clear()
+        polylineTypes.clear()
         cachedRoads = roads
 
         val zoom = map.zoomLevelDouble
@@ -206,12 +202,12 @@ class RoadOverlayManager(
         for (seg in ordinary) {
             val polyline = Polyline().apply {
                 setPoints(seg.points)
-                outlinePaint.color = 0xAAFFAA00.toInt() // 半透明橙色
+                outlinePaint.color = 0xAAFFAA00.toInt()
                 outlinePaint.strokeWidth = baseW
                 outlinePaint.isAntiAlias = true
-                tag = "normal"
             }
             roadPolylines.add(polyline)
+            polylineTypes[polyline] = "normal"
             if (isVisible) map.overlays.add(polyline)
         }
 
@@ -219,12 +215,12 @@ class RoadOverlayManager(
         for (seg in major) {
             val polyline = Polyline().apply {
                 setPoints(seg.points)
-                outlinePaint.color = 0xAAFFAA00.toInt() // 同色
+                outlinePaint.color = 0xAAFFAA00.toInt()
                 outlinePaint.strokeWidth = baseW * 1.5f
                 outlinePaint.isAntiAlias = true
-                tag = "major"
             }
             roadPolylines.add(polyline)
+            polylineTypes[polyline] = "major"
             if (isVisible) map.overlays.add(polyline)
         }
 
@@ -232,12 +228,12 @@ class RoadOverlayManager(
         for (seg in major) {
             val centerLine = Polyline().apply {
                 setPoints(seg.points)
-                outlinePaint.color = 0x99000000.toInt() // 浅黑色
+                outlinePaint.color = 0x99000000.toInt()
                 outlinePaint.strokeWidth = (baseW * 0.12f).coerceAtLeast(0.5f)
                 outlinePaint.isAntiAlias = true
-                tag = "center"
             }
             roadPolylines.add(centerLine)
+            polylineTypes[centerLine] = "center"
             if (isVisible) map.overlays.add(centerLine)
         }
 
@@ -286,6 +282,7 @@ class RoadOverlayManager(
     fun destroy() {
         roadPolylines.forEach { map.overlays.remove(it) }
         roadPolylines.clear()
+        polylineTypes.clear()
         cachedRoads = emptyList()
     }
 }
