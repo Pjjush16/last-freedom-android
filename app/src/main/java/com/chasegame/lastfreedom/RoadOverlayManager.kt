@@ -15,8 +15,9 @@ import kotlin.math.*
 /**
  * 路网数据管理器：
  * 1. 通过 Overpass API 查询当前位置周围的道路矢量数据
- * 2. 在卫星图上绘制道路 Polyline 叠加层（基于真实路宽换算）
- * 3. 提供 GPS 坐标吸附到最近道路的功能
+ * 2. 在卫星图上绘制道路 Polyline 叠加层
+ * 3. 大路（motorway/trunk/双向4车道以上）加宽 + 中间画双黄线
+ * 4. 提供 GPS 坐标吸附到最近道路的功能
  */
 class RoadOverlayManager(
     private val map: MapView,
@@ -24,10 +25,7 @@ class RoadOverlayManager(
 ) {
     data class RoadSegment(
         val points: List<GeoPoint>,
-        val highwayType: String,
-        val lanes: Int = 0,
-        val oneway: Boolean = false,
-        val width: Double = 0.0
+        val isMajor: Boolean = false  // motorway/trunk 或双向4车道以上
     )
 
     private var cachedRoads: List<RoadSegment> = emptyList()
@@ -45,59 +43,6 @@ class RoadOverlayManager(
     private val MIN_ZOOM_FOR_ROADS = 13.0
     private var isVisible = false
 
-    // === 真实路宽默认值（米，基于卫星实测）===
-    private fun roadRealWidthM(type: String): Double = when (type) {
-        "motorway" -> 70.0
-        "motorway_link" -> 25.0
-        "trunk" -> 65.0
-        "trunk_link" -> 20.0
-        "primary" -> 40.0
-        "primary_link" -> 15.0
-        "secondary" -> 30.0
-        "secondary_link" -> 12.0
-        "tertiary" -> 14.0
-        "tertiary_link" -> 8.0
-        "residential" -> 6.0
-        "living_street" -> 5.0
-        "service" -> 4.0
-        else -> 5.0
-    }
-
-    private fun roadFillColor(type: String): Int = when (type) {
-        "motorway", "motorway_link" -> 0x88FF4444.toInt()
-        "trunk", "trunk_link" -> 0x88FF7722.toInt()
-        "primary", "primary_link" -> 0x88FFAA00.toInt()
-        "secondary", "secondary_link" -> 0x88FFDD00.toInt()
-        "tertiary", "tertiary_link" -> 0x8888DD44.toInt()
-        "residential", "living_street" -> 0x8844AAFF.toInt()
-        "service" -> 0x88AAAAAA.toInt()
-        else -> 0x88CCAA00.toInt()
-    }
-
-    private fun roadBorderColor(type: String): Int = when (type) {
-        "motorway", "motorway_link" -> 0xCCBB0000.toInt()
-        "trunk", "trunk_link" -> 0xCCBB4400.toInt()
-        "primary", "primary_link" -> 0xCCBB7700.toInt()
-        "secondary", "secondary_link" -> 0xCCBBAA00.toInt()
-        "tertiary", "tertiary_link" -> 0xCC559922.toInt()
-        "residential", "living_street" -> 0xCC2277BB.toInt()
-        "service" -> 0xCC777777.toInt()
-        else -> 0xCC997700.toInt()
-    }
-
-    // 米→像素换算
-    private fun metersToPixels(meters: Double, lat: Double, zoom: Double): Float {
-        val mpp = 156543.03392 * cos(Math.toRadians(lat)) / (1 shl zoom.toInt()).toDouble()
-        return (meters / mpp).toFloat().coerceAtLeast(1.5f)
-    }
-
-    // 判断是否画双线（双向分隔车道）
-    private fun isDualCarriageway(seg: RoadSegment): Boolean {
-        if (seg.highwayType == "motorway" || seg.highwayType == "trunk") return true
-        if (!seg.oneway && seg.lanes >= 4) return true
-        return false
-    }
-
     // === 缩放控制 ===
     fun updateZoomLevel(zoom: Double) {
         if (!isShowing) return
@@ -111,8 +56,23 @@ class RoadOverlayManager(
             }
             map.invalidate()
         }
-        if (isVisible && cachedRoads.isNotEmpty()) {
-            rebuildAllPolylines()
+        // 动态调整线宽
+        if (isVisible) {
+            val baseW = ((zoom - MIN_ZOOM_FOR_ROADS) / (18.0 - MIN_ZOOM_FOR_ROADS) * 15.0).toFloat().coerceIn(1f, 15f)
+            roadPolylines.forEach { pl ->
+                val tag = pl.tag
+                if (tag == "center") {
+                    // 双黄线：细线，固定宽度
+                    pl.outlinePaint.strokeWidth = (baseW * 0.12f).coerceAtLeast(0.5f)
+                } else if (tag == "major") {
+                    // 大路：比基础宽 50%
+                    pl.outlinePaint.strokeWidth = baseW * 1.5f
+                } else {
+                    // 普通路：基础宽度
+                    pl.outlinePaint.strokeWidth = baseW
+                }
+            }
+            map.invalidate()
         }
     }
 
@@ -124,7 +84,7 @@ class RoadOverlayManager(
             roadPolylines.forEach { map.overlays.add(it) }
             map.invalidate()
         } else if (cachedRoads.isNotEmpty()) {
-            rebuildAllPolylines()
+            updateRoadPolylines(cachedRoads)
         }
     }
 
@@ -147,7 +107,7 @@ class RoadOverlayManager(
         if (cachedForRegion != null) {
             if (cachedRoads !== cachedForRegion) {
                 cachedRoads = cachedForRegion
-                if (isVisible) rebuildAllPolylines()
+                updateRoadPolylines(cachedForRegion)
             }
             return
         }
@@ -162,7 +122,7 @@ class RoadOverlayManager(
                 handler.post {
                     regionCache[gridKey] = roads
                     cachedRoads = roads
-                    if (isVisible) rebuildAllPolylines()
+                    updateRoadPolylines(roads)
                     queryInProgress = false
                 }
             } catch (_: Exception) {
@@ -208,7 +168,12 @@ class RoadOverlayManager(
                 val highwayType = tags.optString("highway", "unclassified")
                 val lanes = tags.optString("lanes", "0").toIntOrNull() ?: 0
                 val oneway = tags.optString("oneway", "no") == "yes"
-                val width = tags.optString("width", "0").toDoubleOrNull() ?: 0.0
+
+                // 判断是否大路：motorway/trunk，或双向4车道以上
+                val isMajor = highwayType == "motorway" || highwayType == "motorway_link"
+                        || highwayType == "trunk" || highwayType == "trunk_link"
+                        || (!oneway && lanes >= 4)
+
                 val geom = way.getJSONArray("geometry")
                 val points = mutableListOf<GeoPoint>()
                 for (j in 0 until geom.length()) {
@@ -216,81 +181,67 @@ class RoadOverlayManager(
                     points.add(GeoPoint(node.getDouble("lat"), node.getDouble("lon")))
                 }
                 if (points.size >= 2) {
-                    roads.add(RoadSegment(points, highwayType, lanes, oneway, width))
+                    roads.add(RoadSegment(points, isMajor))
                 }
             }
         } catch (_: Exception) {}
         return roads
     }
 
-    // === 基于真实路宽重建所有 Polyline ===
-    private fun rebuildAllPolylines() {
-        roadPolylines.forEach { map.overlays.remove(it) }
+    private fun updateRoadPolylines(roads: List<RoadSegment>) {
+        if (isVisible) {
+            roadPolylines.forEach { map.overlays.remove(it) }
+        }
         roadPolylines.clear()
+        cachedRoads = roads
+
         val zoom = map.zoomLevelDouble
-        if (zoom < MIN_ZOOM_FOR_ROADS) return
-        val sortedRoads = cachedRoads.sortedBy { roadRealWidthM(it.highwayType) }
-        for (segment in sortedRoads) {
-            val realWidthM = if (segment.width > 0) segment.width else roadRealWidthM(segment.highwayType)
-            val lat = segment.points.first().latitude
-            val totalWidthPx = metersToPixels(realWidthM, lat, zoom)
-            if (isDualCarriageway(segment) && totalWidthPx > 8f) {
-                val halfWidth = totalWidthPx * 0.4f
-                val offsetM = realWidthM * 0.25
-                for (side in listOf(-1.0, 1.0)) {
-                    val offsetPoints = offsetPolyline(segment.points, offsetM * side, lat)
-                    addRoadPolyline(offsetPoints, halfWidth, segment.highwayType)
-                }
-            } else {
-                addRoadPolyline(segment.points, totalWidthPx, segment.highwayType)
+        val baseW = ((zoom - MIN_ZOOM_FOR_ROADS) / (18.0 - MIN_ZOOM_FOR_ROADS) * 15.0).toFloat().coerceIn(1f, 15f)
+
+        // 先画大路（上层），再画普通路（底层）
+        val ordinary = roads.filter { !it.isMajor }
+        val major = roads.filter { it.isMajor }
+
+        // 普通路
+        for (seg in ordinary) {
+            val polyline = Polyline().apply {
+                setPoints(seg.points)
+                outlinePaint.color = 0xAAFFAA00.toInt() // 半透明橙色
+                outlinePaint.strokeWidth = baseW
+                outlinePaint.isAntiAlias = true
+                tag = "normal"
             }
+            roadPolylines.add(polyline)
+            if (isVisible) map.overlays.add(polyline)
         }
+
+        // 大路：加宽填充
+        for (seg in major) {
+            val polyline = Polyline().apply {
+                setPoints(seg.points)
+                outlinePaint.color = 0xAAFFAA00.toInt() // 同色
+                outlinePaint.strokeWidth = baseW * 1.5f
+                outlinePaint.isAntiAlias = true
+                tag = "major"
+            }
+            roadPolylines.add(polyline)
+            if (isVisible) map.overlays.add(polyline)
+        }
+
+        // 大路：中间双黄线（浅黑色细线）
+        for (seg in major) {
+            val centerLine = Polyline().apply {
+                setPoints(seg.points)
+                outlinePaint.color = 0x99000000.toInt() // 浅黑色
+                outlinePaint.strokeWidth = (baseW * 0.12f).coerceAtLeast(0.5f)
+                outlinePaint.isAntiAlias = true
+                tag = "center"
+            }
+            roadPolylines.add(centerLine)
+            if (isVisible) map.overlays.add(centerLine)
+        }
+
         map.invalidate()
-    }
-
-    private fun addRoadPolyline(points: List<GeoPoint>, widthPx: Float, type: String) {
-        // 边线（深色描边）
-        val border = Polyline().apply {
-            setPoints(points)
-            outlinePaint.color = roadBorderColor(type)
-            outlinePaint.strokeWidth = widthPx + 2f
-            outlinePaint.isAntiAlias = true
-            outlinePaint.style = Paint.Style.STROKE
-        }
-        roadPolylines.add(border)
-        if (isVisible) map.overlays.add(border)
-        // 填充线（半透明彩色）
-        val fill = Polyline().apply {
-            setPoints(points)
-            outlinePaint.color = roadFillColor(type)
-            outlinePaint.strokeWidth = widthPx
-            outlinePaint.isAntiAlias = true
-            outlinePaint.style = Paint.Style.STROKE
-        }
-        roadPolylines.add(fill)
-        if (isVisible) map.overlays.add(fill)
-    }
-
-    // 偏移 Polyline（用于双线车道）
-    private fun offsetPolyline(points: List<GeoPoint>, offsetM: Double, refLat: Double): List<GeoPoint> {
-        if (points.size < 2) return points
-        val result = mutableListOf<GeoPoint>()
-        for (i in points.indices) {
-            val prev = if (i > 0) points[i - 1] else points[i]
-            val next = if (i < points.size - 1) points[i + 1] else points[i]
-            val dx = next.longitude - prev.longitude
-            val dy = next.latitude - prev.latitude
-            val len = sqrt(dx * dx + dy * dy)
-            if (len < 1e-10) { result.add(points[i]); continue }
-            val nx = -dy / len
-            val ny = dx / len
-            val mPerDegLat = 111320.0
-            val mPerDegLng = 111320.0 * cos(Math.toRadians(refLat))
-            val offsetLat = points[i].latitude + ny * offsetM / mPerDegLat
-            val offsetLng = points[i].longitude + nx * offsetM / mPerDegLng
-            result.add(GeoPoint(offsetLat, offsetLng))
-        }
-        return result
     }
 
     // === 道路吸附 ===
