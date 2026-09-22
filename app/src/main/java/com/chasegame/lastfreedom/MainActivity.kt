@@ -154,6 +154,10 @@ class MainActivity : AppCompatActivity() {
         setupZoomControls()
         setupMapStyleMenu()
         roadManager = RoadOverlayManager(map, handler)
+        // 恢复路网叠加层（如果上次选择了 SATELLITE_ROAD 模式）
+        if (currentMapMode == MapMode.SATELLITE_ROAD) {
+            roadManager?.show()
+        }
         setupStickers()
         setupBreakoutHud()
         requestPermissions()
@@ -167,7 +171,10 @@ class MainActivity : AppCompatActivity() {
         // 根据恢复的模式设置底图
         when (currentMapMode) {
             MapMode.SATELLITE -> map.setTileSource(createSatelliteSource())
-            MapMode.SATELLITE_ROAD -> map.setTileSource(createSatelliteSource())
+            MapMode.SATELLITE_ROAD -> {
+                map.setTileSource(createSatelliteSource())
+                // 注意：路网叠加层需要在 roadManager 初始化后恢复，见 setupMapStyleMenu()
+            }
             MapMode.STANDARD -> map.setTileSource(createOsmStandardSource())
         }
 

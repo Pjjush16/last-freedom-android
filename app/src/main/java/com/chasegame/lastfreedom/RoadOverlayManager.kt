@@ -21,14 +21,17 @@ class RoadOverlayManager(
     private val map: MapView,
     private val handler: Handler
 ) {
-    // 缓存的道路段（GeoPoint 列表）
-    private var cachedRoads: List<List<GeoPoint>> = emptyList()
+    // 道路类型数据
+    data class RoadSegment(val points: List<GeoPoint>, val highwayType: String)
+
+    // 缓存的道路段
+    private var cachedRoads: List<RoadSegment> = emptyList()
     private var lastQueryLat = 0.0
     private var lastQueryLng = 0.0
     private var queryInProgress = false
 
-    // 区域缓存：按 1km x 1km 网格缓存路网数据
-    private val regionCache = mutableMapOf<String, List<List<GeoPoint>>>()
+    // 区域缓存
+    private val regionCache = mutableMapOf<String, List<RoadSegment>>()
     private val CACHE_GRID_SIZE_M = 1000.0  // 1km 网格
 
     // 查询半径（米）
@@ -41,6 +44,29 @@ class RoadOverlayManager(
     private var isShowing = false
     private val MIN_ZOOM_FOR_ROADS = 13.0
     private var isVisible = false
+
+    // 道路类型 → 颜色/宽度映射
+    private fun roadColor(type: String): Int = when (type) {
+        "motorway", "motorway_link" -> 0xCCFF4444.toInt()  // 高速：红色
+        "trunk", "trunk_link" -> 0xCCFF6600.toInt()         // 快速路：橙红
+        "primary", "primary_link" -> 0xCCFFAA00.toInt()     // 主干道：橙色
+        "secondary", "secondary_link" -> 0xCCFFDD00.toInt() // 次干道：黄色
+        "tertiary", "tertiary_link" -> 0xCC88DD44.toInt()   // 支路：浅绿
+        "residential", "living_street" -> 0xCC44AAFF.toInt()// 居民区道路：蓝色
+        "service" -> 0xCCAAAAAA.toInt()                      // 服务道路：灰色
+        else -> 0xAAFFAA00.toInt()                           // 其他：半透明橙
+    }
+
+    private fun roadBaseWidth(type: String): Float = when (type) {
+        "motorway", "motorway_link" -> 14f
+        "trunk", "trunk_link" -> 12f
+        "primary", "primary_link" -> 10f
+        "secondary", "secondary_link" -> 8f
+        "tertiary", "tertiary_link" -> 6f
+        "residential", "living_street" -> 4f
+        "service" -> 3f
+        else -> 4f
+    }
 
     // === 缩放控制 ===
     fun updateZoomLevel(zoom: Double) {
@@ -55,10 +81,13 @@ class RoadOverlayManager(
             }
             map.invalidate()
         }
-        // 动态调整路网线宽：zoom 18 → 15f，zoom 13 → 0f（线性插值）
+        // 动态调整路网线宽：按道路类型基础宽度 + 缩放级别缩放
         if (isVisible) {
-            val strokeW = ((zoom - MIN_ZOOM_FOR_ROADS) / (18.0 - MIN_ZOOM_FOR_ROADS) * 15.0).toFloat().coerceIn(1f, 15f)
-            roadPolylines.forEach { it.outlinePaint.strokeWidth = strokeW }
+            val zoomFactor = ((zoom - MIN_ZOOM_FOR_ROADS) / (18.0 - MIN_ZOOM_FOR_ROADS)).toFloat().coerceIn(0.3f, 1.5f)
+            roadPolylines.forEachIndexed { index, polyline ->
+                val type = if (index < cachedRoads.size) cachedRoads[index].highwayType else "unclassified"
+                polyline.outlinePaint.strokeWidth = roadBaseWidth(type) * zoomFactor
+            }
             map.invalidate()
         }
     }
@@ -98,7 +127,6 @@ class RoadOverlayManager(
         // 检查区域缓存
         val cachedForRegion = regionCache[gridKey]
         if (cachedForRegion != null) {
-            // 命中缓存，直接使用
             if (cachedRoads !== cachedForRegion) {
                 cachedRoads = cachedForRegion
                 updateRoadPolylines(cachedRoads)
@@ -106,7 +134,7 @@ class RoadOverlayManager(
             return
         }
 
-        // 未命中缓存，检查距离阈值（避免频繁查询）
+        // 未命中缓存，检查距离阈值
         val dist = haversine(lastQueryLat, lastQueryLng, lat, lng)
         if (dist < reQueryDistanceM && cachedRoads.isNotEmpty()) return
 
@@ -118,7 +146,6 @@ class RoadOverlayManager(
             try {
                 val roads = queryOverpassRoads(lat, lng, queryRadiusM)
                 handler.post {
-                    // 存入区域缓存
                     regionCache[gridKey] = roads
                     cachedRoads = roads
                     updateRoadPolylines(roads)
@@ -143,12 +170,12 @@ class RoadOverlayManager(
      * Overpass API 查询道路数据
      * 返回道路段列表，每段是一系列 GeoPoint
      */
-    private fun queryOverpassRoads(lat: Double, lng: Double, radiusM: Double): List<List<GeoPoint>> {
+    private fun queryOverpassRoads(lat: Double, lng: Double, radiusM: Double): List<RoadSegment> {
         val query = """
             [out:json][timeout:10];
             way["highway"~"^(motorway|trunk|primary|secondary|tertiary|residential|unclassified|living_street|service|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link)$"]
             (around:$radiusM,$lat,$lng);
-            out geom;
+            out tags geom;
         """.trimIndent()
 
         val encoded = URLEncoder.encode(query, "UTF-8")
@@ -166,8 +193,8 @@ class RoadOverlayManager(
         return parseOverpassResponse(response)
     }
 
-    private fun parseOverpassResponse(json: String): List<List<GeoPoint>> {
-        val roads = mutableListOf<List<GeoPoint>>()
+    private fun parseOverpassResponse(json: String): List<RoadSegment> {
+        val roads = mutableListOf<RoadSegment>()
         try {
             val root = JSONObject(json)
             val elements = root.getJSONArray("elements")
@@ -175,6 +202,8 @@ class RoadOverlayManager(
             for (i in 0 until elements.length()) {
                 val way = elements.getJSONObject(i)
                 if (!way.has("geometry")) continue
+
+                val highwayType = way.optJSONObject("tags")?.optString("highway", "unclassified") ?: "unclassified"
 
                 val geom = way.getJSONArray("geometry")
                 val points = mutableListOf<GeoPoint>()
@@ -185,7 +214,7 @@ class RoadOverlayManager(
                     points.add(GeoPoint(lat, lon))
                 }
                 if (points.size >= 2) {
-                    roads.add(points)
+                    roads.add(RoadSegment(points, highwayType))
                 }
             }
         } catch (_: Exception) {}
@@ -195,7 +224,7 @@ class RoadOverlayManager(
     /**
      * 更新 Polyline 叠加层
      */
-    private fun updateRoadPolylines(roads: List<List<GeoPoint>>) {
+    private fun updateRoadPolylines(roads: List<RoadSegment>) {
         // 移除旧的
         if (isVisible) {
             roadPolylines.forEach { map.overlays.remove(it) }
@@ -204,14 +233,15 @@ class RoadOverlayManager(
 
         cachedRoads = roads
 
-        // 创建新的 Polyline
-        for (roadPoints in roads) {
+        // 按类型分层渲染：先画小路（底层），再画大路（上层）
+        val sortedRoads = roads.sortedBy { roadBaseWidth(it.highwayType) }
+
+        for (segment in sortedRoads) {
             val polyline = Polyline().apply {
-                setPoints(roadPoints)
-                outlinePaint.color = 0xAAFFAA00.toInt() // 半透明橙色
-                outlinePaint.strokeWidth = 10f
+                setPoints(segment.points)
+                outlinePaint.color = roadColor(segment.highwayType)
+                outlinePaint.strokeWidth = roadBaseWidth(segment.highwayType)
                 outlinePaint.isAntiAlias = true
-                // 半透明填充让路网在卫星图上可见
             }
             roadPolylines.add(polyline)
             if (isVisible) {
@@ -234,7 +264,8 @@ class RoadOverlayManager(
         var minDist = Double.MAX_VALUE
         var nearestPoint = GeoPoint(lat, lng)
 
-        for (roadPoints in cachedRoads) {
+        for (segment in cachedRoads) {
+            val roadPoints = segment.points
             for (i in 0 until roadPoints.size - 1) {
                 val p = nearestPointOnSegment(
                     lat, lng,
