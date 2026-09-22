@@ -153,11 +153,7 @@ class MainActivity : AppCompatActivity() {
         setupMap()
         setupZoomControls()
         setupMapStyleMenu()
-        roadManager = RoadOverlayManager(map, handler)
-        // 恢复路网叠加层（如果上次选择了 SATELLITE_ROAD 模式）
-        if (currentMapMode == MapMode.SATELLITE_ROAD) {
-            roadManager?.show()
-        }
+        // roadManager 在 setupRoadManager() 中创建（权限授予后，interpolatedProvider 已就绪）
         setupStickers()
         setupBreakoutHud()
         requestPermissions()
@@ -751,6 +747,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupRoadManager() {
         roadManager = RoadOverlayManager(map, handler)
+        // 恢复路网模式：如果上次选择了 SATELLITE_ROAD，立即显示并触发查询
+        if (currentMapMode == MapMode.SATELLITE_ROAD) {
+            roadManager?.show()
+            interpolatedProvider?.lastKnownLocation?.let { loc ->
+                roadManager?.updateForPosition(loc.latitude, loc.longitude)
+            }
+        }
     }
 
     private fun setupInertialNavigation() {

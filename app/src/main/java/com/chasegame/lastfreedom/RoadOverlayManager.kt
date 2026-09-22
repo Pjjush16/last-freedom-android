@@ -98,9 +98,13 @@ class RoadOverlayManager(
         if (isShowing) return
         isShowing = true
         isVisible = map.zoomLevelDouble >= MIN_ZOOM_FOR_ROADS
-        if (isVisible) {
+        // 如果有已构建的 polylines，直接加回地图
+        if (roadPolylines.isNotEmpty() && isVisible) {
             roadPolylines.forEach { map.overlays.add(it) }
             map.invalidate()
+        } else if (cachedRoads.isNotEmpty()) {
+            // polylines 被清空了但道路数据还在，重建
+            updateRoadPolylines(cachedRoads)
         }
     }
 
