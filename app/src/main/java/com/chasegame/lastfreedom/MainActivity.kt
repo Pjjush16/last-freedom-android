@@ -379,9 +379,7 @@ class MainActivity : AppCompatActivity() {
     // === 选点模式（高德风格：准星居中 + 拖地图选目的地）===
 
     private fun enterPickerMode() {
-        if (currentMapMode != MapMode.SATELLITE_ROAD) {
-            switchMapMode(MapMode.SATELLITE_ROAD)
-        }
+        // 不强制切换地图模式，保持用户当前选择的模式
         pickerModeActive = true
         pickerCameraWasFollowing = (cameraState == CameraState.FOLLOW)
 
