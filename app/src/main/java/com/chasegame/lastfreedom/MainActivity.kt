@@ -113,8 +113,8 @@ class MainActivity : AppCompatActivity() {
     // === 背景音乐 ===
     private var bgmManager: BgmManager? = null
 
-    // === AI 评分模型 ===
-    private var aiScoringModel: AIScoringModel? = null
+    // === 规则打分系统 ===
+    private var ruleScoringModel: RuleScoringModel? = null
 
     // === 突围引擎 ===
     private var breakoutEngine: BreakoutEngine? = null
@@ -625,7 +625,7 @@ class MainActivity : AppCompatActivity() {
         setupInertialNavigation()
         bgmManager = BgmManager(this)
         bgmManager?.enterPicking()  // 从启动就开始播放漫游音乐
-        aiScoringModel = AIScoringModel(this)
+        ruleScoringModel = RuleScoringModel(this)
         breakoutEngine = BreakoutEngine(handler).apply {
             onStateChanged = { state ->
                 handler.post {
@@ -645,7 +645,7 @@ class MainActivity : AppCompatActivity() {
                         }
                         BreakoutEngine.State.VICTORY -> {
                             bgmManager?.playVictory()
-                            val score = aiScoringModel?.scoreRound(
+                            val score = ruleScoringModel?.scoreRound(
                                 true,
                                 breakoutEngine?.getElapsedSeconds() ?: 0,
                                 breakoutEngine?.getTotalDistanceM() ?: 0.0,
@@ -653,13 +653,13 @@ class MainActivity : AppCompatActivity() {
                                 interpolatedProvider?.getMaxSpeedKmh()?.times(0.6f) ?: 0f,
                                 breakoutEngine?.tortuosityIndex ?: 1.5
                             )
-                            val stars = if (score != null) "★".repeat(score.roundedStars.coerceIn(1,10)) + "☆".repeat((10 - score.roundedStars).coerceIn(0,9)) else ""
-                            tvBreakoutInfo.text = "消星成功\n$stars\n${score?.comment ?: ""}\n战力: ${score?.totalPower ?: 0}"
+                            val gainStr = if ((score?.starsGained ?: 0) >= 0) "+${score?.starsGained}" else "${score?.starsGained}"
+                            tvBreakoutInfo.text = "消星成功\n${gainStr}★ (驾驶+${score?.drivingBonus})\n累计${score?.totalStars}★\n${score?.comment ?: ""}"
                             tvBreakoutInfo.setTextColor(0xFF44FF44.toInt())
                         }
                         BreakoutEngine.State.ARRESTED -> {
                             bgmManager?.playArrested()
-                            val score = aiScoringModel?.scoreRound(
+                            val score = ruleScoringModel?.scoreRound(
                                 false,
                                 breakoutEngine?.getElapsedSeconds() ?: 0,
                                 breakoutEngine?.getTotalDistanceM() ?: 0.0,
@@ -667,13 +667,13 @@ class MainActivity : AppCompatActivity() {
                                 interpolatedProvider?.getMaxSpeedKmh()?.times(0.6f) ?: 0f,
                                 breakoutEngine?.tortuosityIndex ?: 1.5
                             )
-                            val stars = if (score != null) "★".repeat(score.roundedStars.coerceIn(1,10)) + "☆".repeat((10 - score.roundedStars).coerceIn(0,9)) else ""
-                            tvBreakoutInfo.text = "被捕\n$stars\n${score?.comment ?: ""}\n战力: ${score?.totalPower ?: 0}"
+                            val gainStr = if ((score?.starsGained ?: 0) >= 0) "+${score?.starsGained}" else "${score?.starsGained}"
+                            tvBreakoutInfo.text = "被捕\n${gainStr}★ (驾驶+${score?.drivingBonus} 失败-1)\n累计${score?.totalStars}★\n${score?.comment ?: ""}"
                             tvBreakoutInfo.setTextColor(0xFFFF4444.toInt())
                         }
                         BreakoutEngine.State.TIMEOUT -> {
                             bgmManager?.playArrested()
-                            val score = aiScoringModel?.scoreRound(
+                            val score = ruleScoringModel?.scoreRound(
                                 false,
                                 breakoutEngine?.getElapsedSeconds() ?: 0,
                                 breakoutEngine?.getTotalDistanceM() ?: 0.0,
@@ -681,8 +681,8 @@ class MainActivity : AppCompatActivity() {
                                 interpolatedProvider?.getMaxSpeedKmh()?.times(0.6f) ?: 0f,
                                 breakoutEngine?.tortuosityIndex ?: 1.5
                             )
-                            val stars = if (score != null) "★".repeat(score.roundedStars.coerceIn(1,10)) + "☆".repeat((10 - score.roundedStars).coerceIn(0,9)) else ""
-                            tvBreakoutInfo.text = "超时\n$stars\n${score?.comment ?: ""}\n战力: ${score?.totalPower ?: 0}"
+                            val gainStr = if ((score?.starsGained ?: 0) >= 0) "+${score?.starsGained}" else "${score?.starsGained}"
+                            tvBreakoutInfo.text = "超时\n${gainStr}★ (驾驶+${score?.drivingBonus} 失败-1)\n累计${score?.totalStars}★\n${score?.comment ?: ""}"
                             tvBreakoutInfo.setTextColor(0xFFFF8800.toInt())
                         }
                     }
@@ -722,9 +722,9 @@ class MainActivity : AppCompatActivity() {
                     val tSec = hud.timeLimitSec % 60
                     tvTimer.text = String.format("%02d:%02d / %02d:%02d", eMin, eSec, tMin, tSec)
 
-                    // AI 实时预测：突围中时定期评估是否可能晋升八星
+                    // 规则打分实时预测：突围中时定期评估累计是否接近八星
                     if (hud.state == BreakoutEngine.State.BREAKOUT) {
-                        val predicted = aiScoringModel?.predictCurrentRound(
+                        val predicted = ruleScoringModel?.predictCurrentRound(
                             interpolatedProvider?.getMaxSpeedKmh() ?: 0f,
                             (interpolatedProvider?.getMaxSpeedKmh() ?: 0f) * 0.6f,
                             breakoutEngine?.getTotalDistanceM() ?: 0.0,
