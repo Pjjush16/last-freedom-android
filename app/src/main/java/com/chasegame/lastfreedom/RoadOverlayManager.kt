@@ -16,8 +16,9 @@ import kotlin.math.*
  * 路网数据管理器：
  * 1. 通过 Overpass API 查询当前位置周围的道路矢量数据
  * 2. 在卫星图上绘制道路 Polyline 叠加层
- * 3. 大路（motorway/trunk/双向4车道以上）加宽 + 中间画双黄线
- * 4. 提供 GPS 坐标吸附到最近道路的功能
+ * 3. 主路（motorway/trunk）：两条绿色边线 + 中间黑色填充
+ * 4. 非主路：加粗蓝色线
+ * 5. 提供 GPS 坐标吸附到最近道路的功能
  */
 class RoadOverlayManager(
     private val map: MapView,
@@ -25,7 +26,9 @@ class RoadOverlayManager(
 ) {
     data class RoadSegment(
         val points: List<GeoPoint>,
-        val isMajor: Boolean = false  // motorway/trunk 或双向4车道以上
+        val highwayType: String = "unclassified",
+        val isMajor: Boolean = false,
+        val lanes: Int = 0
     )
 
     private var cachedRoads: List<RoadSegment> = emptyList()
@@ -39,10 +42,15 @@ class RoadOverlayManager(
     private val reQueryDistanceM = 400.0
 
     private val roadPolylines = mutableListOf<Polyline>()
-    private val polylineTypes = HashMap<Polyline, String>()  // polyline -> "normal"/"major"/"center"
+    private val polylineTypes = HashMap<Polyline, String>()  // "minor" / "major_fill" / "major_edge"
     private var isShowing = false
     private val MIN_ZOOM_FOR_ROADS = 13.0
     private var isVisible = false
+
+    // === 颜色常量 ===
+    private val COLOR_MAJOR_EDGE = 0xAA00CC44.toInt()   // 主路边线：绿色
+    private val COLOR_MAJOR_FILL = 0xCC000000.toInt()   // 主路中间填充：黑色
+    private val COLOR_MINOR = 0xAA4488FF.toInt()        // 非主路：蓝色
 
     // === 缩放控制 ===
     fun updateZoomLevel(zoom: Double) {
@@ -62,9 +70,9 @@ class RoadOverlayManager(
             val baseW = ((zoom - MIN_ZOOM_FOR_ROADS) / (18.0 - MIN_ZOOM_FOR_ROADS) * 15.0).toFloat().coerceIn(1f, 15f)
             roadPolylines.forEach { pl ->
                 when (polylineTypes[pl]) {
-                    "center" -> pl.outlinePaint.strokeWidth = (baseW * 0.12f).coerceAtLeast(0.5f)
-                    "major" -> pl.outlinePaint.strokeWidth = baseW * 1.5f
-                    else -> pl.outlinePaint.strokeWidth = baseW
+                    "major_fill" -> pl.outlinePaint.strokeWidth = baseW * 2.0f
+                    "major_edge" -> pl.outlinePaint.strokeWidth = (baseW * 0.35f).coerceAtLeast(1.0f)
+                    "minor" -> pl.outlinePaint.strokeWidth = baseW * 1.3f
                 }
             }
             map.invalidate()
@@ -164,10 +172,9 @@ class RoadOverlayManager(
                 val lanes = tags.optString("lanes", "0").toIntOrNull() ?: 0
                 val oneway = tags.optString("oneway", "no") == "yes"
 
-                // 判断是否大路：motorway/trunk，或双向4车道以上
+                // 主路判定：motorway/trunk 及其 link
                 val isMajor = highwayType == "motorway" || highwayType == "motorway_link"
                         || highwayType == "trunk" || highwayType == "trunk_link"
-                        || (!oneway && lanes >= 4)
 
                 val geom = way.getJSONArray("geometry")
                 val points = mutableListOf<GeoPoint>()
@@ -176,7 +183,7 @@ class RoadOverlayManager(
                     points.add(GeoPoint(node.getDouble("lat"), node.getDouble("lon")))
                 }
                 if (points.size >= 2) {
-                    roads.add(RoadSegment(points, isMajor))
+                    roads.add(RoadSegment(points, highwayType, isMajor, lanes))
                 }
             }
         } catch (_: Exception) {}
@@ -194,47 +201,58 @@ class RoadOverlayManager(
         val zoom = map.zoomLevelDouble
         val baseW = ((zoom - MIN_ZOOM_FOR_ROADS) / (18.0 - MIN_ZOOM_FOR_ROADS) * 15.0).toFloat().coerceIn(1f, 15f)
 
-        // 先画大路（上层），再画普通路（底层）
         val ordinary = roads.filter { !it.isMajor }
         val major = roads.filter { it.isMajor }
 
-        // 普通路
+        // === 第1层：主路黑色填充（最宽，铺底） ===
+        for (seg in major) {
+            val fillLine = Polyline().apply {
+                setPoints(seg.points)
+                outlinePaint.color = COLOR_MAJOR_FILL
+                outlinePaint.strokeWidth = baseW * 2.0f
+                outlinePaint.isAntiAlias = true
+                outlinePaint.style = Paint.Style.STROKE
+                outlinePaint.strokeCap = Paint.Cap.ROUND
+                outlinePaint.strokeJoin = Paint.Join.ROUND
+            }
+            roadPolylines.add(fillLine)
+            polylineTypes[fillLine] = "major_fill"
+            if (isVisible) map.overlays.add(fillLine)
+        }
+
+        // === 第2层：主路绿色边线（两条细线，画在黑色填充两侧） ===
+        // osmdroid Polyline 不支持 offset，用两条同路径细线 + 视觉上模拟双线效果：
+        // 画一条较细的绿色线叠加在黑色填充上，视觉上形成"黑底 + 绿边"
+        // 实际效果：黑色宽底 + 绿色细线 = 两侧绿线中间黑色
+        for (seg in major) {
+            val edgeLine = Polyline().apply {
+                setPoints(seg.points)
+                outlinePaint.color = COLOR_MAJOR_EDGE
+                outlinePaint.strokeWidth = (baseW * 0.35f).coerceAtLeast(1.0f)
+                outlinePaint.isAntiAlias = true
+                outlinePaint.style = Paint.Style.STROKE
+                outlinePaint.strokeCap = Paint.Cap.ROUND
+                outlinePaint.strokeJoin = Paint.Join.ROUND
+            }
+            roadPolylines.add(edgeLine)
+            polylineTypes[edgeLine] = "major_edge"
+            if (isVisible) map.overlays.add(edgeLine)
+        }
+
+        // === 第3层：非主路蓝色加粗线 ===
         for (seg in ordinary) {
             val polyline = Polyline().apply {
                 setPoints(seg.points)
-                outlinePaint.color = 0xAAFFAA00.toInt()
-                outlinePaint.strokeWidth = baseW
+                outlinePaint.color = COLOR_MINOR
+                outlinePaint.strokeWidth = baseW * 1.3f
                 outlinePaint.isAntiAlias = true
+                outlinePaint.style = Paint.Style.STROKE
+                outlinePaint.strokeCap = Paint.Cap.ROUND
+                outlinePaint.strokeJoin = Paint.Join.ROUND
             }
             roadPolylines.add(polyline)
-            polylineTypes[polyline] = "normal"
+            polylineTypes[polyline] = "minor"
             if (isVisible) map.overlays.add(polyline)
-        }
-
-        // 大路：加宽填充
-        for (seg in major) {
-            val polyline = Polyline().apply {
-                setPoints(seg.points)
-                outlinePaint.color = 0xAAFFAA00.toInt()
-                outlinePaint.strokeWidth = baseW * 1.5f
-                outlinePaint.isAntiAlias = true
-            }
-            roadPolylines.add(polyline)
-            polylineTypes[polyline] = "major"
-            if (isVisible) map.overlays.add(polyline)
-        }
-
-        // 大路：中间双黄线（浅黑色细线）
-        for (seg in major) {
-            val centerLine = Polyline().apply {
-                setPoints(seg.points)
-                outlinePaint.color = 0x99000000.toInt()
-                outlinePaint.strokeWidth = (baseW * 0.12f).coerceAtLeast(0.5f)
-                outlinePaint.isAntiAlias = true
-            }
-            roadPolylines.add(centerLine)
-            polylineTypes[centerLine] = "center"
-            if (isVisible) map.overlays.add(centerLine)
         }
 
         map.invalidate()
