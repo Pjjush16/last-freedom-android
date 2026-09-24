@@ -182,7 +182,8 @@ class RuleScoringModel(context: Context) {
         }
     }
 
-    // totalStars 和 totalRounds 属性已自动生成 getter
+    fun getTotalStars(): Int = totalStars
+    fun getTotalRounds(): Int = totalRounds
     fun getWinRate(): Double = if (totalRounds > 0) totalWins.toDouble() / totalRounds else 0.0
 
     /** 重置累计数据（调试用） */
